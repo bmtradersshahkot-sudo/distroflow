@@ -37,6 +37,17 @@ def close_db(error):
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
+def audit(action, entity=None, entity_id=None, details=None):
+    try:
+        db = get_db()
+        db.execute(
+            "INSERT INTO audit_logs (user, action, entity, entity_id, details) VALUES (?,?,?,?,?)",
+            (session.get("username") or "system", action, entity, entity_id, details)
+        )
+        db.commit()
+    except Exception:
+        pass
+
 def row_to_dict(row):
     return dict(row) if row else None
 
@@ -169,6 +180,82 @@ def init_db():
         key TEXT PRIMARY KEY,
         value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS sale_returns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        return_no TEXT UNIQUE NOT NULL,
+        sale_id INTEGER,
+        order_no TEXT,
+        customer_id INTEGER,
+        customer_name TEXT,
+        amount REAL DEFAULT 0,
+        reason TEXT,
+        status TEXT DEFAULT "Completed",
+        return_date TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS return_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        return_id INTEGER NOT NULL,
+        product_id INTEGER,
+        product_name TEXT,
+        quantity INTEGER NOT NULL,
+        unit_price REAL NOT NULL,
+        total REAL NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        category TEXT DEFAULT "General",
+        amount REAL NOT NULL,
+        expense_date TEXT NOT NULL,
+        notes TEXT,
+        created_by TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS quotations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        quote_no TEXT UNIQUE NOT NULL,
+        customer_id INTEGER,
+        customer_name TEXT NOT NULL,
+        subtotal REAL DEFAULT 0,
+        tax_rate REAL DEFAULT 0,
+        tax_amount REAL DEFAULT 0,
+        discount REAL DEFAULT 0,
+        amount REAL NOT NULL,
+        status TEXT DEFAULT "Draft",
+        notes TEXT,
+        quote_date TEXT NOT NULL,
+        valid_until TEXT,
+        created_by TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS quote_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        quote_id INTEGER NOT NULL,
+        product_id INTEGER,
+        product_name TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        unit_price REAL NOT NULL,
+        total REAL NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS warehouses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        location TEXT,
+        status TEXT DEFAULT "Active"
+    );
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user TEXT,
+        action TEXT NOT NULL,
+        entity TEXT,
+        entity_id INTEGER,
+        details TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     """)
     db.commit()
 
@@ -231,6 +318,9 @@ def seed_data(db):
         ("tax_rate","18"),
     ]
     db.executemany("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", settings)
+    if db.execute("SELECT COUNT(*) FROM warehouses").fetchone()[0] == 0:
+        db.execute("INSERT INTO warehouses (name, location) VALUES (?,?)", ("Main Warehouse", "Lahore"))
+        db.execute("INSERT INTO warehouses (name, location) VALUES (?,?)", ("Secondary Godown", "Karachi"))
     db.commit()
 
 
@@ -681,6 +771,214 @@ def report_summary():
         "sales_total": sales["total"], "sales_count": sales["count"],
         "purchases_total": purchases["total"], "purchases_count": purchases["count"],
         "payments_total": payments["total"], "by_type": by_type, "top_customers": top_customers,
+    })
+
+
+
+# ---- RETURNS ----
+@app.route("/api/returns", methods=["GET"])
+def get_returns():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM sale_returns ORDER BY id DESC LIMIT 100").fetchall()))
+
+@app.route("/api/returns", methods=["POST"])
+def create_return():
+    data = request.json or {}
+    db = get_db()
+    items = data.get("items", [])
+    last = db.execute("SELECT return_no FROM sale_returns ORDER BY id DESC LIMIT 1").fetchone()
+    num = int(last["return_no"].replace("RT-", "")) + 1 if last else 1001
+    return_no = f"RT-{num}"
+    amount = sum(float(i["quantity"]) * float(i["unit_price"]) for i in items) if items else float(data.get("amount", 0))
+    cur = db.execute(
+        """INSERT INTO sale_returns (return_no, sale_id, order_no, customer_id, customer_name, amount, reason, status, return_date, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (return_no, data.get("sale_id"), data.get("order_no"), data.get("customer_id"), data.get("customer_name", ""),
+         amount, data.get("reason", ""), "Completed", data.get("return_date", date.today().isoformat()), session.get("username", "admin"))
+    )
+    rid = cur.lastrowid
+    for item in items:
+        db.execute(
+            "INSERT INTO return_items (return_id, product_id, product_name, quantity, unit_price, total) VALUES (?,?,?,?,?,?)",
+            (rid, item.get("product_id"), item["product_name"], item["quantity"], item["unit_price"], float(item["quantity"]) * float(item["unit_price"]))
+        )
+        if item.get("product_id"):
+            db.execute("UPDATE products SET stock = stock + ? WHERE id=?", (item["quantity"], item["product_id"]))
+            db.execute("INSERT INTO stock_movements (product_id, product_name, type, quantity, reference) VALUES (?,?,?,?,?)",
+                       (item["product_id"], item["product_name"], "Return", int(item["quantity"]), return_no))
+    if data.get("customer_id") and amount:
+        db.execute("UPDATE customers SET outstanding = MAX(0, outstanding - ?) WHERE id=?", (amount, data["customer_id"]))
+    audit("create_return", "sale_returns", rid, return_no)
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM sale_returns WHERE id=?", (rid,)).fetchone())), 201
+
+# ---- EXPENSES ----
+@app.route("/api/expenses", methods=["GET"])
+def get_expenses():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM expenses ORDER BY id DESC LIMIT 100").fetchall()))
+
+@app.route("/api/expenses", methods=["POST"])
+def create_expense():
+    data = request.json or {}
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO expenses (title, category, amount, expense_date, notes, created_by) VALUES (?,?,?,?,?,?)",
+        (data["title"], data.get("category", "General"), float(data["amount"]),
+         data.get("expense_date", date.today().isoformat()), data.get("notes", ""), session.get("username", "admin"))
+    )
+    audit("create_expense", "expenses", cur.lastrowid, data.get("title"))
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM expenses WHERE id=?", (cur.lastrowid,)).fetchone())), 201
+
+@app.route("/api/expenses/<int:eid>", methods=["DELETE"])
+def delete_expense(eid):
+    db = get_db()
+    db.execute("DELETE FROM expenses WHERE id=?", (eid,))
+    db.commit()
+    return jsonify({"ok": True})
+
+# ---- QUOTATIONS ----
+@app.route("/api/quotations", methods=["GET"])
+def get_quotations():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM quotations ORDER BY id DESC LIMIT 100").fetchall()))
+
+@app.route("/api/quotations/<int:qid>")
+def get_quotation(qid):
+    db = get_db()
+    q = row_to_dict(db.execute("SELECT * FROM quotations WHERE id=?", (qid,)).fetchone())
+    if not q:
+        return jsonify({"error": "Not found"}), 404
+    q["items"] = rows_to_list(db.execute("SELECT * FROM quote_items WHERE quote_id=?", (qid,)).fetchall())
+    return jsonify(q)
+
+@app.route("/api/quotations", methods=["POST"])
+def create_quotation():
+    data = request.json or {}
+    db = get_db()
+    items = data.get("items", [])
+    last = db.execute("SELECT quote_no FROM quotations ORDER BY id DESC LIMIT 1").fetchone()
+    num = int(last["quote_no"].replace("QT-", "")) + 1 if last else 1001
+    quote_no = f"QT-{num}"
+    subtotal = sum(float(i["quantity"]) * float(i["unit_price"]) for i in items) if items else float(data.get("amount", 0))
+    tax_rate = float(data.get("tax_rate", 0))
+    discount = float(data.get("discount", 0))
+    tax_amount = round(subtotal * tax_rate / 100, 2)
+    amount = round(subtotal + tax_amount - discount, 2)
+    cur = db.execute(
+        """INSERT INTO quotations (quote_no, customer_id, customer_name, subtotal, tax_rate, tax_amount, discount, amount, status, notes, quote_date, valid_until, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (quote_no, data.get("customer_id"), data.get("customer_name", "Customer"), subtotal, tax_rate, tax_amount, discount, amount,
+         data.get("status", "Draft"), data.get("notes", ""), data.get("quote_date", date.today().isoformat()),
+         data.get("valid_until"), session.get("username", "admin"))
+    )
+    qid = cur.lastrowid
+    for item in items:
+        db.execute(
+            "INSERT INTO quote_items (quote_id, product_id, product_name, quantity, unit_price, total) VALUES (?,?,?,?,?,?)",
+            (qid, item.get("product_id"), item["product_name"], item["quantity"], item["unit_price"], float(item["quantity"]) * float(item["unit_price"]))
+        )
+    audit("create_quotation", "quotations", qid, quote_no)
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM quotations WHERE id=?", (qid,)).fetchone())), 201
+
+@app.route("/api/quotations/<int:qid>", methods=["PUT"])
+def update_quotation(qid):
+    data = request.json or {}
+    db = get_db()
+    db.execute("UPDATE quotations SET status=?, notes=? WHERE id=?", (data.get("status"), data.get("notes"), qid))
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM quotations WHERE id=?", (qid,)).fetchone()))
+
+@app.route("/api/quotations/<int:qid>/convert", methods=["POST"])
+def convert_quotation(qid):
+    """Convert quotation to sale."""
+    db = get_db()
+    q = row_to_dict(db.execute("SELECT * FROM quotations WHERE id=?", (qid,)).fetchone())
+    if not q:
+        return jsonify({"error": "Not found"}), 404
+    items = rows_to_list(db.execute("SELECT * FROM quote_items WHERE quote_id=?", (qid,)).fetchall())
+    sale_items = [{"product_id": i["product_id"], "product_name": i["product_name"], "sku": "", "quantity": i["quantity"], "unit_price": i["unit_price"]} for i in items]
+    # reuse create sale logic via internal call pattern
+    last = db.execute("SELECT order_no FROM sales ORDER BY id DESC LIMIT 1").fetchone()
+    num = int(last["order_no"].replace("SO-", "")) + 1 if last else 1001
+    order_no = f"SO-{num}"
+    cur = db.execute(
+        """INSERT INTO sales (order_no, customer_id, customer_name, type, subtotal, tax_rate, tax_amount, discount, amount, paid, status, payment_status, notes, order_date, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (order_no, q["customer_id"], q["customer_name"], "Wholesale", q["subtotal"], q["tax_rate"], q["tax_amount"], q["discount"], q["amount"], 0,
+         "Pending", "Unpaid", f"From quote {q['quote_no']}", date.today().isoformat(), session.get("username", "admin"))
+    )
+    sale_id = cur.lastrowid
+    for item in sale_items:
+        db.execute(
+            "INSERT INTO sale_items (sale_id, product_id, product_name, sku, quantity, unit_price, total) VALUES (?,?,?,?,?,?,?)",
+            (sale_id, item.get("product_id"), item["product_name"], "", item["quantity"], item["unit_price"], float(item["quantity"]) * float(item["unit_price"]))
+        )
+        if item.get("product_id"):
+            db.execute("UPDATE products SET stock = stock - ? WHERE id=?", (item["quantity"], item["product_id"]))
+            db.execute("INSERT INTO stock_movements (product_id, product_name, type, quantity, reference) VALUES (?,?,?,?,?)",
+                       (item["product_id"], item["product_name"], "Sale", -int(item["quantity"]), order_no))
+    db.execute("UPDATE quotations SET status=? WHERE id=?", ("Converted", qid))
+    if q.get("customer_id"):
+        db.execute("UPDATE customers SET outstanding = outstanding + ? WHERE id=?", (q["amount"], q["customer_id"]))
+    audit("convert_quotation", "sales", sale_id, order_no)
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone())), 201
+
+# ---- WAREHOUSES ----
+@app.route("/api/warehouses", methods=["GET"])
+def get_warehouses():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM warehouses ORDER BY id").fetchall()))
+
+@app.route("/api/warehouses", methods=["POST"])
+def create_warehouse():
+    data = request.json or {}
+    db = get_db()
+    cur = db.execute("INSERT INTO warehouses (name, location) VALUES (?,?)", (data["name"], data.get("location", "")))
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM warehouses WHERE id=?", (cur.lastrowid,)).fetchone())), 201
+
+# ---- AUDIT ----
+@app.route("/api/audit-logs")
+def get_audit_logs():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100").fetchall()))
+
+# ---- PROFIT REPORT ----
+@app.route("/api/reports/profit")
+def report_profit():
+    db = get_db()
+    from_date = request.args.get("from", (date.today() - timedelta(days=30)).isoformat())
+    to_date = request.args.get("to", date.today().isoformat())
+    # Approximate COGS from sale_items * product cost
+    rows = db.execute(
+        """SELECT si.product_name, SUM(si.quantity) as qty, SUM(si.total) as revenue,
+                  SUM(si.quantity * COALESCE(p.cost, 0)) as cogs
+           FROM sale_items si
+           JOIN sales s ON s.id = si.sale_id
+           LEFT JOIN products p ON p.id = si.product_id
+           WHERE s.order_date BETWEEN ? AND ?
+           GROUP BY si.product_name
+           ORDER BY revenue DESC""",
+        (from_date, to_date)
+    ).fetchall()
+    items = rows_to_list(rows)
+    total_rev = sum(i["revenue"] or 0 for i in items)
+    total_cogs = sum(i["cogs"] or 0 for i in items)
+    expenses = db.execute(
+        "SELECT COALESCE(SUM(amount),0) as t FROM expenses WHERE expense_date BETWEEN ? AND ?",
+        (from_date, to_date)
+    ).fetchone()["t"]
+    return jsonify({
+        "from": from_date, "to": to_date,
+        "revenue": total_rev, "cogs": total_cogs,
+        "gross_profit": total_rev - total_cogs,
+        "expenses": expenses,
+        "net_profit": total_rev - total_cogs - expenses,
+        "items": items
     })
 
 
