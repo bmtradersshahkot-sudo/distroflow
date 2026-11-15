@@ -652,6 +652,57 @@ def report_summary():
         "payments_total": payments["total"], "by_type": by_type, "top_customers": top_customers,
     })
 
+
+# ---- USERS ----
+@app.route("/api/users", methods=["GET"])
+def get_users():
+    db = get_db()
+    rows = db.execute("SELECT id, username, full_name, role, status, created_at FROM users ORDER BY id").fetchall()
+    return jsonify(rows_to_list(rows))
+
+@app.route("/api/users", methods=["POST"])
+def create_user():
+    data = request.json or {}
+    db = get_db()
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+    try:
+        cur = db.execute(
+            "INSERT INTO users (username, password, full_name, role) VALUES (?,?,?,?)",
+            (username, hash_password(password), data.get("full_name", username), data.get("role", "sales"))
+        )
+        db.commit()
+        row = db.execute("SELECT id, username, full_name, role, status FROM users WHERE id=?", (cur.lastrowid,)).fetchone()
+        return jsonify(row_to_dict(row)), 201
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "Username already exists"}), 400
+
+@app.route("/api/users/<int:uid>", methods=["PUT"])
+def update_user(uid):
+    data = request.json or {}
+    db = get_db()
+    if data.get("password"):
+        db.execute("UPDATE users SET full_name=?, role=?, status=?, password=? WHERE id=?",
+                   (data.get("full_name"), data.get("role"), data.get("status", "Active"), hash_password(data["password"]), uid))
+    else:
+        db.execute("UPDATE users SET full_name=?, role=?, status=? WHERE id=?",
+                   (data.get("full_name"), data.get("role"), data.get("status", "Active"), uid))
+    db.commit()
+    row = db.execute("SELECT id, username, full_name, role, status FROM users WHERE id=?", (uid,)).fetchone()
+    return jsonify(row_to_dict(row))
+
+@app.route("/api/users/<int:uid>", methods=["DELETE"])
+def delete_user(uid):
+    db = get_db()
+    if uid == session.get("user_id"):
+        return jsonify({"error": "Cannot delete yourself"}), 400
+    db.execute("DELETE FROM users WHERE id=?", (uid,))
+    db.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
