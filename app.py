@@ -246,6 +246,47 @@ def init_db():
         location TEXT,
         status TEXT DEFAULT "Active"
     );
+    
+    CREATE TABLE IF NOT EXISTS warehouse_stocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        warehouse_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity INTEGER DEFAULT 0,
+        UNIQUE(warehouse_id, product_id)
+    );
+    CREATE TABLE IF NOT EXISTS stock_transfers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transfer_no TEXT UNIQUE,
+        from_warehouse_id INTEGER,
+        to_warehouse_id INTEGER,
+        product_id INTEGER,
+        product_name TEXT,
+        quantity INTEGER,
+        notes TEXT,
+        transfer_date TEXT,
+        created_by TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER,
+        order_no TEXT,
+        customer_name TEXT,
+        driver_name TEXT,
+        vehicle TEXT,
+        status TEXT DEFAULT "Pending",
+        delivery_date TEXT,
+        notes TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS branches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        city TEXT,
+        phone TEXT,
+        status TEXT DEFAULT "Active"
+    );
+
     CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT,
@@ -321,6 +362,8 @@ def seed_data(db):
     if db.execute("SELECT COUNT(*) FROM warehouses").fetchone()[0] == 0:
         db.execute("INSERT INTO warehouses (name, location) VALUES (?,?)", ("Main Warehouse", "Lahore"))
         db.execute("INSERT INTO warehouses (name, location) VALUES (?,?)", ("Secondary Godown", "Karachi"))
+    if db.execute("SELECT COUNT(*) FROM branches").fetchone()[0] == 0:
+        db.execute("INSERT INTO branches (name, city, phone) VALUES (?,?,?)", ("Main Branch", "Lahore", "042-1234567"))
     db.commit()
 
 
@@ -980,6 +1023,134 @@ def report_profit():
         "net_profit": total_rev - total_cogs - expenses,
         "items": items
     })
+
+
+
+# ---- WAREHOUSE STOCK + TRANSFERS ----
+@app.route("/api/warehouse-stocks")
+def warehouse_stocks():
+    db = get_db()
+    wid = request.args.get("warehouse_id")
+    if wid:
+        rows = db.execute(
+            """SELECT ws.*, p.name as product_name, p.sku, w.name as warehouse_name
+               FROM warehouse_stocks ws
+               JOIN products p ON p.id = ws.product_id
+               JOIN warehouses w ON w.id = ws.warehouse_id
+               WHERE ws.warehouse_id=? ORDER BY p.name""", (wid,)
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT ws.*, p.name as product_name, p.sku, w.name as warehouse_name
+               FROM warehouse_stocks ws
+               JOIN products p ON p.id = ws.product_id
+               JOIN warehouses w ON w.id = ws.warehouse_id
+               ORDER BY w.name, p.name"""
+        ).fetchall()
+    return jsonify(rows_to_list(rows))
+
+@app.route("/api/stock-transfers", methods=["GET"])
+def get_transfers():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM stock_transfers ORDER BY id DESC LIMIT 50").fetchall()))
+
+@app.route("/api/stock-transfers", methods=["POST"])
+def create_transfer():
+    data = request.json or {}
+    db = get_db()
+    last = db.execute("SELECT transfer_no FROM stock_transfers ORDER BY id DESC LIMIT 1").fetchone()
+    num = int(last["transfer_no"].replace("TR-", "")) + 1 if last else 1001
+    transfer_no = f"TR-{num}"
+    qty = int(data["quantity"])
+    pid = data["product_id"]
+    from_w = data["from_warehouse_id"]
+    to_w = data["to_warehouse_id"]
+    # adjust warehouse stocks
+    row = db.execute("SELECT quantity FROM warehouse_stocks WHERE warehouse_id=? AND product_id=?", (from_w, pid)).fetchone()
+    from_qty = row["quantity"] if row else 0
+    if from_qty < qty:
+        # allow using main product stock as fallback
+        pass
+    db.execute(
+        """INSERT INTO warehouse_stocks (warehouse_id, product_id, quantity) VALUES (?,?,?)
+           ON CONFLICT(warehouse_id, product_id) DO UPDATE SET quantity = quantity - ?""",
+        (from_w, pid, max(0, from_qty - qty), qty)
+    )
+    db.execute(
+        """INSERT INTO warehouse_stocks (warehouse_id, product_id, quantity) VALUES (?,?,?)
+           ON CONFLICT(warehouse_id, product_id) DO UPDATE SET quantity = quantity + ?""",
+        (to_w, pid, qty, qty)
+    )
+    db.execute(
+        """INSERT INTO stock_transfers (transfer_no, from_warehouse_id, to_warehouse_id, product_id, product_name, quantity, notes, transfer_date, created_by)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (transfer_no, from_w, to_w, pid, data.get("product_name", ""), qty, data.get("notes", ""),
+         date.today().isoformat(), session.get("username", "admin"))
+    )
+    db.execute("INSERT INTO stock_movements (product_id, product_name, type, quantity, reference, notes) VALUES (?,?,?,?,?,?)",
+               (pid, data.get("product_name", ""), "Transfer", qty, transfer_no, f"{from_w}->{to_w}"))
+    audit("stock_transfer", "stock_transfers", None, transfer_no)
+    db.commit()
+    return jsonify({"ok": True, "transfer_no": transfer_no}), 201
+
+# ---- DELIVERIES ----
+@app.route("/api/deliveries", methods=["GET"])
+def get_deliveries():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM deliveries ORDER BY id DESC LIMIT 100").fetchall()))
+
+@app.route("/api/deliveries", methods=["POST"])
+def create_delivery():
+    data = request.json or {}
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO deliveries (sale_id, order_no, customer_name, driver_name, vehicle, status, delivery_date, notes)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (data.get("sale_id"), data.get("order_no"), data.get("customer_name"), data.get("driver_name"),
+         data.get("vehicle"), data.get("status", "Pending"), data.get("delivery_date", date.today().isoformat()), data.get("notes", ""))
+    )
+    if data.get("sale_id") and data.get("status") == "Delivered":
+        db.execute("UPDATE sales SET status=? WHERE id=?", ("Delivered", data["sale_id"]))
+    audit("create_delivery", "deliveries", cur.lastrowid, data.get("order_no"))
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM deliveries WHERE id=?", (cur.lastrowid,)).fetchone())), 201
+
+@app.route("/api/deliveries/<int:did>", methods=["PUT"])
+def update_delivery(did):
+    data = request.json or {}
+    db = get_db()
+    db.execute("UPDATE deliveries SET status=?, driver_name=?, vehicle=?, notes=? WHERE id=?",
+               (data.get("status"), data.get("driver_name"), data.get("vehicle"), data.get("notes"), did))
+    d = db.execute("SELECT * FROM deliveries WHERE id=?", (did,)).fetchone()
+    if d and data.get("status") == "Delivered" and d["sale_id"]:
+        db.execute("UPDATE sales SET status=? WHERE id=?", ("Delivered", d["sale_id"]))
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM deliveries WHERE id=?", (did,)).fetchone()))
+
+# ---- BRANCHES ----
+@app.route("/api/branches", methods=["GET"])
+def get_branches():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM branches ORDER BY id").fetchall()))
+
+@app.route("/api/branches", methods=["POST"])
+def create_branch():
+    data = request.json or {}
+    db = get_db()
+    cur = db.execute("INSERT INTO branches (name, city, phone) VALUES (?,?,?)",
+                     (data["name"], data.get("city", ""), data.get("phone", "")))
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM branches WHERE id=?", (cur.lastrowid,)).fetchone())), 201
+
+# ---- PURCHASE WITH ITEMS DETAIL ----
+@app.route("/api/purchases/<int:pid>")
+def get_purchase(pid):
+    db = get_db()
+    p = row_to_dict(db.execute("SELECT * FROM purchases WHERE id=?", (pid,)).fetchone())
+    if not p:
+        return jsonify({"error": "Not found"}), 404
+    p["items"] = rows_to_list(db.execute("SELECT * FROM purchase_items WHERE purchase_id=?", (pid,)).fetchall())
+    return jsonify(p)
 
 
 # ---- USERS ----
