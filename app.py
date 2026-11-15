@@ -11,8 +11,12 @@ from flask_cors import CORS
 from functools import wraps
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-app.secret_key = os.environ.get("SECRET_KEY", "distroflow-pro-secret-2026")
-CORS(app, supports_credentials=True)
+app.secret_key = os.environ.get("SECRET_KEY", "distroflow-pro-secret-key-change-me-2026")
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SECURE"] = False  # True only with custom domain HTTPS strict
+app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 7
+CORS(app, supports_credentials=True, origins="*")
 
 DATABASE = os.environ.get("DATABASE_PATH", os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "distroflow.db")))
 
@@ -229,6 +233,32 @@ def seed_data(db):
     db.executemany("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", settings)
     db.commit()
 
+
+@app.route("/api/health")
+def health():
+    db = get_db()
+    users = db.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
+    return jsonify({"ok": True, "users": users, "message": "DistroFlow Pro running"})
+
+@app.route("/api/setup", methods=["POST"])
+def setup_admin():
+    """Ensure default admin exists (safe to call anytime)."""
+    db = get_db()
+    user = db.execute("SELECT id FROM users WHERE username='admin'").fetchone()
+    if not user:
+        db.execute("INSERT INTO users (username, password, full_name, role) VALUES (?,?,?,?)",
+                   ("admin", hash_password("admin123"), "Administrator", "admin"))
+        db.commit()
+        return jsonify({"ok": True, "created": True, "message": "Admin created: admin / admin123"})
+    # Reset password option
+    data = request.json or {}
+    if data.get("reset") is True:
+        db.execute("UPDATE users SET password=? WHERE username='admin'", (hash_password("admin123"),))
+        db.commit()
+        return jsonify({"ok": True, "reset": True, "message": "Admin password reset to admin123"})
+    return jsonify({"ok": True, "created": False, "message": "Admin already exists"})
+
+
 # ---- AUTH ----
 @app.route("/api/login", methods=["POST"])
 def login():
@@ -238,6 +268,7 @@ def login():
     db = get_db()
     user = db.execute("SELECT * FROM users WHERE username=? AND status='Active'", (username,)).fetchone()
     if user and user["password"] == hash_password(password):
+        session.permanent = True
         session["user_id"] = user["id"]
         session["username"] = user["username"]
         session["full_name"] = user["full_name"]
