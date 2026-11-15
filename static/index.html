@@ -7,6 +7,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lucide@latest"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script>tailwind.config={theme:{extend:{fontFamily:{sans:["Inter","system-ui","sans-serif"]},colors:{primary:{500:"#3b82f6",600:"#2563eb",700:"#1d4ed8"}}}}}</script>
 <style>
@@ -41,6 +42,18 @@ body{font-family:Inter,system-ui,sans-serif}
     .glass{background:rgba(255,255,255,.95);backdrop-filter:blur(12px)}
     input:focus,select:focus,textarea:focus{outline:none;box-shadow:0 0 0 3px rgba(37,99,235,.2);border-color:#2563eb}
     .nav-glow.active{box-shadow:inset 3px 0 0 #60a5fa}
+    body.dark-mode{background:#0f172a;color:#e2e8f0}
+    body.dark-mode .card{background:#1e293b;border-color:#334155;color:#e2e8f0}
+    body.dark-mode header{background:#1e293b;border-color:#334155}
+    body.dark-mode input,body.dark-mode select,body.dark-mode textarea{background:#0f172a;border-color:#334155;color:#e2e8f0}
+    body.dark-mode table thead tr{background:#0f172a!important}
+    body.dark-mode .bg-slate-50{background:#0f172a}
+    body.dark-mode .text-slate-900{color:#f1f5f9}
+    body.dark-mode .text-slate-700{color:#cbd5e1}
+    body.dark-mode .text-slate-600{color:#94a3b8}
+    body.dark-mode .text-slate-500{color:#94a3b8}
+    body.dark-mode .border-slate-200,body.dark-mode .border-slate-100{border-color:#334155}
+    body.dark-mode .hover\:bg-slate-50:hover{background:#334155}
 </style>
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
@@ -98,6 +111,12 @@ body{font-family:Inter,system-ui,sans-serif}
       <a href="#" onclick="showPage('purchases');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="purchases"><i data-lucide="truck" class="h-5 w-5"></i> Purchases</a>
       <a href="#" onclick="showPage('suppliers');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="suppliers"><i data-lucide="building-2" class="h-5 w-5"></i> Suppliers</a>
       <a href="#" onclick="showPage('reports');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="reports"><i data-lucide="bar-chart-3" class="h-5 w-5"></i> Reports</a>
+      
+      <a href="#" onclick="showPage('returns');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="returns"><i data-lucide="undo-2" class="h-5 w-5"></i> Returns</a>
+      <a href="#" onclick="showPage('quotations');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="quotations"><i data-lucide="file-text" class="h-5 w-5"></i> Quotations</a>
+      <a href="#" onclick="showPage('expenses');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="expenses"><i data-lucide="receipt" class="h-5 w-5"></i> Expenses</a>
+      <a href="#" onclick="showPage('warehouses');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="warehouses"><i data-lucide="building" class="h-5 w-5"></i> Warehouses</a>
+
       <a href="#" onclick="showPage('users');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="users" id="navUsers"><i data-lucide="shield" class="h-5 w-5"></i> Users</a>
       <a href="#" onclick="showPage('settings');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="settings"><i data-lucide="settings" class="h-5 w-5"></i> Settings</a>
     </nav>
@@ -117,6 +136,7 @@ body{font-family:Inter,system-ui,sans-serif}
     <header class="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-slate-200 bg-white px-4 sm:px-6 no-print">
       <button onclick="document.getElementById('sidebar').classList.toggle('-translate-x-full')" class="lg:hidden rounded-lg p-2 text-slate-600 hover:bg-slate-100"><i data-lucide="menu" class="h-5 w-5"></i></button>
       <div class="flex-1"><h2 class="text-sm font-semibold text-slate-700" id="pageTitle">Dashboard</h2></div>
+      <button onclick="toggleDark()" class="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="Dark mode"><i data-lucide="moon" class="h-4 w-4"></i></button>
       <span class="flex items-center gap-1.5 text-xs text-emerald-600"><span class="h-2 w-2 rounded-full bg-emerald-500"></span> Online</span>
     </header>
     <main class="p-4 sm:p-6">
@@ -140,7 +160,7 @@ body{font-family:Inter,system-ui,sans-serif}
         <div class="grid gap-4 lg:grid-cols-3">
           <div class="lg:col-span-2 space-y-4">
             <div class="card p-4">
-              <input id="posSearch" type="search" placeholder="Search product by name or SKU..." class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" oninput="filterPosProducts()"/>
+              <input id="posSearch" type="search" placeholder="Search name / SKU / Barcode..." class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" oninput="filterPosProducts()"/>
             </div>
             <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" id="posProducts"></div>
           </div>
@@ -256,9 +276,61 @@ body{font-family:Inter,system-ui,sans-serif}
         </div>
         <div class="grid gap-4 sm:grid-cols-3" id="repStats"></div>
         <div class="card p-5"><h3 class="font-semibold mb-3">Top Customers</h3><div id="topCustomers"></div></div>
+        <div class="card p-5"><h3 class="font-semibold mb-3">Profit Report</h3>
+          <div class="grid gap-3 sm:grid-cols-4 mb-4" id="profitStats"></div>
+          <div id="profitItems" class="text-sm"></div>
+        </div>
       </div>
 
       
+      
+      <!-- RETURNS -->
+      <div id="page-returns" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Sale Returns</h1>
+          <button onclick="openReturnModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ New Return</button>
+        </div>
+        <div class="card overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="bg-slate-50 text-left text-slate-500 border-b"><th class="px-4 py-3">Return No</th><th class="px-4 py-3">Date</th><th class="px-4 py-3">Customer</th><th class="px-4 py-3">Order</th><th class="px-4 py-3">Amount</th><th class="px-4 py-3">Reason</th></tr></thead>
+          <tbody id="returnsBody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- QUOTATIONS -->
+      <div id="page-quotations" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Quotations</h1>
+          <button onclick="openQuoteModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ New Quote</button>
+        </div>
+        <div class="card overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="bg-slate-50 text-left text-slate-500 border-b"><th class="px-4 py-3">Quote No</th><th class="px-4 py-3">Date</th><th class="px-4 py-3">Customer</th><th class="px-4 py-3">Amount</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Actions</th></tr></thead>
+          <tbody id="quotesBody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- EXPENSES -->
+      <div id="page-expenses" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Expenses</h1>
+          <button onclick="openExpenseModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ Add Expense</button>
+        </div>
+        <div class="card overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="bg-slate-50 text-left text-slate-500 border-b"><th class="px-4 py-3">Date</th><th class="px-4 py-3">Title</th><th class="px-4 py-3">Category</th><th class="px-4 py-3">Amount</th><th class="px-4 py-3">Notes</th><th class="px-4 py-3"></th></tr></thead>
+          <tbody id="expensesBody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- WAREHOUSES -->
+      <div id="page-warehouses" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Warehouses</h1>
+          <button onclick="openWarehouseModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ Add Warehouse</button>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" id="warehousesGrid"></div>
+        <div class="card"><div class="px-5 py-4 border-b"><h3 class="font-semibold">Audit Log</h3></div>
+          <div class="overflow-x-auto max-h-64"><table class="w-full text-sm">
+            <thead><tr class="text-left text-slate-500 border-b"><th class="px-4 py-2">Time</th><th class="px-4 py-2">User</th><th class="px-4 py-2">Action</th><th class="px-4 py-2">Details</th></tr></thead>
+            <tbody id="auditBody"></tbody>
+          </table></div>
+        </div>
+      </div>
+
       <!-- USERS -->
       <div id="page-users" class="page space-y-4">
         <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">User Management</h1>
@@ -309,6 +381,8 @@ body{font-family:Inter,system-ui,sans-serif}
     <div class="flex justify-between items-center border-b px-6 py-4 no-print">
       <h3 class="font-semibold">Invoice</h3>
       <div class="flex gap-2">
+        <button onclick="downloadInvoicePDF()" class="rounded-lg border px-3 py-1.5 text-sm">PDF</button>
+        <button onclick="shareWhatsApp()" class="rounded-lg border px-3 py-1.5 text-sm text-emerald-600">WhatsApp</button>
         <button onclick="window.print()" class="rounded-lg bg-primary-600 px-3 py-1.5 text-sm text-white">Print</button>
         <button onclick="closeInvoice()" class="rounded-lg border px-3 py-1.5 text-sm">Close</button>
       </div>
@@ -442,7 +516,7 @@ function showPage(name){
   const link=document.querySelector(`[data-page="${name}"]`);
   if(link) link.classList.add("active");
   document.getElementById("sidebar").classList.add("-translate-x-full");
-  const titles={dashboard:"Dashboard",pos:"New Sale (POS)",sales:"Sales Orders",products:"Products",inventory:"Inventory",customers:"Customers",payments:"Payments",purchases:"Purchases",suppliers:"Suppliers",reports:"Reports",users:"Users",settings:"Settings"};
+  const titles={dashboard:"Dashboard",pos:"New Sale (POS)",sales:"Sales Orders",products:"Products",inventory:"Inventory",customers:"Customers",payments:"Payments",purchases:"Purchases",suppliers:"Suppliers",reports:"Reports",returns:"Returns",quotations:"Quotations",expenses:"Expenses",warehouses:"Warehouses",users:"Users",settings:"Settings"};
   document.getElementById("pageTitle").textContent = titles[name]||name;
   if(name==="dashboard") loadDashboard();
   if(name==="pos") loadPOS();
@@ -454,6 +528,10 @@ function showPage(name){
   if(name==="purchases") loadPurchases();
   if(name==="suppliers") loadSuppliers();
   if(name==="reports") loadReports();
+  if(name==="returns") loadReturns();
+  if(name==="quotations") loadQuotations();
+  if(name==="expenses") loadExpenses();
+  if(name==="warehouses") loadWarehouses();
   if(name==="users") loadUsers();
   if(name==="settings") loadSettings();
   lucide.createIcons();
@@ -951,6 +1029,260 @@ async function viewLedger(id){
       </div>
     </div>`, ()=>closeModal());
   document.getElementById("modalSaveBtn").textContent="Close";
+}
+
+
+// DARK MODE
+function toggleDark(){
+  document.body.classList.toggle("dark-mode");
+  localStorage.setItem("df_dark", document.body.classList.contains("dark-mode") ? "1" : "0");
+}
+if(localStorage.getItem("df_dark")==="1") document.body.classList.add("dark-mode");
+
+// RETURNS
+async function loadReturns(){
+  const list=await api("/api/returns");
+  document.getElementById("returnsBody").innerHTML=list.map(r=>`<tr class="border-b border-slate-50">
+    <td class="px-4 py-3 font-medium text-primary-600">${r.return_no}</td>
+    <td class="px-4 py-3">${r.return_date}</td>
+    <td class="px-4 py-3">${r.customer_name||"-"}</td>
+    <td class="px-4 py-3">${r.order_no||"-"}</td>
+    <td class="px-4 py-3 font-semibold">Rs ${Number(r.amount).toLocaleString()}</td>
+    <td class="px-4 py-3 text-slate-500">${r.reason||""}</td>
+  </tr>`).join("")||"<tr><td colspan='6' class='px-4 py-8 text-center text-slate-400'>No returns</td></tr>";
+}
+async function openReturnModal(){
+  productsCache=await api("/api/products");
+  customersCache=await api("/api/customers");
+  openModal("New Sale Return",`
+    <div class="space-y-3">
+      <div><label class="text-sm font-medium">Customer</label>
+        <select id="f_rcust" class="w-full rounded-lg border px-3 py-2 text-sm">${customersCache.map(c=>`<option value="${c.id}" data-name="${c.name}">${c.name}</option>`).join("")}</select></div>
+      <div><label class="text-sm font-medium">Product</label>
+        <select id="f_rprod" class="w-full rounded-lg border px-3 py-2 text-sm">${productsCache.map(p=>`<option value="${p.id}" data-name="${p.name}" data-price="${p.wholesale}">${p.name} (Stock ${p.stock})</option>`).join("")}</select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">Qty</label><input id="f_rqty" type="number" value="1" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+        <div><label class="text-sm font-medium">Unit Price</label><input id="f_rprice" type="number" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      </div>
+      <div><label class="text-sm font-medium">Reason</label><input id="f_rreason" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="Damaged / Wrong item / etc"/></div>
+    </div>`, async()=>{
+    const psel=document.getElementById("f_rprod");
+    const csel=document.getElementById("f_rcust");
+    const qty=Number(document.getElementById("f_rqty").value)||1;
+    let price=Number(document.getElementById("f_rprice").value);
+    if(!price) price=Number(psel.options[psel.selectedIndex].dataset.price)||0;
+    await api("/api/returns",{method:"POST",body:{
+      customer_id:Number(csel.value), customer_name:csel.options[csel.selectedIndex].dataset.name,
+      reason:document.getElementById("f_rreason").value,
+      items:[{product_id:Number(psel.value), product_name:psel.options[psel.selectedIndex].dataset.name, quantity:qty, unit_price:price}]
+    }});
+    toast("Return created"); closeModal(); loadReturns();
+  });
+}
+
+// QUOTATIONS
+async function loadQuotations(){
+  const list=await api("/api/quotations");
+  document.getElementById("quotesBody").innerHTML=list.map(q=>`<tr class="border-b border-slate-50">
+    <td class="px-4 py-3 font-medium text-primary-600">${q.quote_no}</td>
+    <td class="px-4 py-3">${q.quote_date}</td>
+    <td class="px-4 py-3">${q.customer_name}</td>
+    <td class="px-4 py-3 font-semibold">Rs ${Number(q.amount).toLocaleString()}</td>
+    <td class="px-4 py-3">${badge(q.status)}</td>
+    <td class="px-4 py-3">${q.status!=="Converted"?`<button onclick="convertQuote(${q.id})" class="text-xs text-primary-600 mr-2">Convert to Sale</button>`:""}</td>
+  </tr>`).join("")||"<tr><td colspan='6' class='px-4 py-8 text-center text-slate-400'>No quotations</td></tr>";
+}
+async function openQuoteModal(){
+  productsCache=await api("/api/products");
+  customersCache=await api("/api/customers");
+  openModal("New Quotation",`
+    <div class="space-y-3">
+      <div><label class="text-sm font-medium">Customer</label>
+        <select id="f_qcust" class="w-full rounded-lg border px-3 py-2 text-sm">${customersCache.map(c=>`<option value="${c.id}" data-name="${c.name}">${c.name}</option>`).join("")}</select></div>
+      <div><label class="text-sm font-medium">Product</label>
+        <select id="f_qprod" class="w-full rounded-lg border px-3 py-2 text-sm">${productsCache.map(p=>`<option value="${p.id}" data-name="${p.name}" data-price="${p.wholesale}">${p.name}</option>`).join("")}</select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">Qty</label><input id="f_qqty" type="number" value="1" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+        <div><label class="text-sm font-medium">Price</label><input id="f_qprice" type="number" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      </div>
+      <div><label class="text-sm font-medium">Tax %</label><input id="f_qtax" type="number" value="0" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+    </div>`, async()=>{
+    const psel=document.getElementById("f_qprod");
+    const csel=document.getElementById("f_qcust");
+    const qty=Number(document.getElementById("f_qqty").value)||1;
+    let price=Number(document.getElementById("f_qprice").value);
+    if(!price) price=Number(psel.options[psel.selectedIndex].dataset.price)||0;
+    await api("/api/quotations",{method:"POST",body:{
+      customer_id:Number(csel.value), customer_name:csel.options[csel.selectedIndex].dataset.name,
+      tax_rate:Number(document.getElementById("f_qtax").value)||0,
+      items:[{product_id:Number(psel.value), product_name:psel.options[psel.selectedIndex].dataset.name, quantity:qty, unit_price:price}]
+    }});
+    toast("Quotation created"); closeModal(); loadQuotations();
+  });
+}
+async function convertQuote(id){
+  if(!confirm("Convert this quotation to a sale order?")) return;
+  try{
+    const sale=await api("/api/quotations/"+id+"/convert",{method:"POST",body:{}});
+    toast("Converted to "+sale.order_no);
+    loadQuotations();
+  }catch(e){toast(e.message,"error")}
+}
+
+// EXPENSES
+async function loadExpenses(){
+  const list=await api("/api/expenses");
+  document.getElementById("expensesBody").innerHTML=list.map(e=>`<tr class="border-b border-slate-50">
+    <td class="px-4 py-3">${e.expense_date}</td>
+    <td class="px-4 py-3 font-medium">${e.title}</td>
+    <td class="px-4 py-3">${e.category}</td>
+    <td class="px-4 py-3 font-semibold text-red-600">Rs ${Number(e.amount).toLocaleString()}</td>
+    <td class="px-4 py-3 text-slate-500">${e.notes||""}</td>
+    <td class="px-4 py-3"><button onclick="deleteExpense(${e.id})" class="text-xs text-red-600">Del</button></td>
+  </tr>`).join("")||"<tr><td colspan='6' class='px-4 py-8 text-center text-slate-400'>No expenses</td></tr>";
+}
+function openExpenseModal(){
+  openModal("Add Expense",`
+    <div class="space-y-3">
+      <div><label class="text-sm font-medium">Title *</label><input id="f_etitle" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">Category</label>
+          <select id="f_ecat" class="w-full rounded-lg border px-3 py-2 text-sm"><option>Rent</option><option>Utilities</option><option>Salaries</option><option>Transport</option><option>Marketing</option><option>General</option></select></div>
+        <div><label class="text-sm font-medium">Amount *</label><input id="f_eamt" type="number" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      </div>
+      <div><label class="text-sm font-medium">Date</label><input id="f_edate" type="date" class="w-full rounded-lg border px-3 py-2 text-sm" value="${new Date().toISOString().slice(0,10)}"/></div>
+      <div><label class="text-sm font-medium">Notes</label><input id="f_enotes" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+    </div>`, async()=>{
+    const title=document.getElementById("f_etitle").value.trim();
+    const amount=Number(document.getElementById("f_eamt").value);
+    if(!title||!amount){toast("Title & amount required","error");return;}
+    await api("/api/expenses",{method:"POST",body:{title, category:document.getElementById("f_ecat").value, amount, expense_date:document.getElementById("f_edate").value, notes:document.getElementById("f_enotes").value}});
+    toast("Expense added"); closeModal(); loadExpenses();
+  });
+}
+async function deleteExpense(id){ if(!confirm("Delete expense?"))return; await api("/api/expenses/"+id,{method:"DELETE"}); toast("Deleted"); loadExpenses(); }
+
+// WAREHOUSES + AUDIT
+async function loadWarehouses(){
+  const list=await api("/api/warehouses");
+  document.getElementById("warehousesGrid").innerHTML=list.map(w=>`
+    <div class="card p-5"><div class="flex items-center gap-3 mb-2">
+      <div class="h-10 w-10 rounded-lg bg-primary-600/10 flex items-center justify-center"><i data-lucide="building" class="h-5 w-5 text-primary-600"></i></div>
+      <div><h3 class="font-semibold">${w.name}</h3><p class="text-sm text-slate-500">${w.location||"-"}</p></div>
+    </div><span class="badge badge-success">${w.status}</span></div>`).join("");
+  lucide.createIcons();
+  try{
+    const logs=await api("/api/audit-logs");
+    document.getElementById("auditBody").innerHTML=logs.map(l=>`<tr class="border-b border-slate-50">
+      <td class="px-4 py-2 text-xs">${(l.created_at||"").slice(0,16)}</td>
+      <td class="px-4 py-2">${l.user||"-"}</td>
+      <td class="px-4 py-2">${l.action}</td>
+      <td class="px-4 py-2 text-slate-500">${l.details||l.entity||""}</td>
+    </tr>`).join("")||"<tr><td colspan='4' class='px-4 py-4 text-slate-400'>No logs</td></tr>";
+  }catch(e){}
+}
+function openWarehouseModal(){
+  openModal("Add Warehouse",`
+    <div class="space-y-3">
+      <div><label class="text-sm font-medium">Name *</label><input id="f_wname" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      <div><label class="text-sm font-medium">Location</label><input id="f_wloc" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+    </div>`, async()=>{
+    const name=document.getElementById("f_wname").value.trim();
+    if(!name){toast("Name required","error");return;}
+    await api("/api/warehouses",{method:"POST",body:{name, location:document.getElementById("f_wloc").value}});
+    toast("Warehouse added"); closeModal(); loadWarehouses();
+  });
+}
+
+// PROFIT REPORT (extend loadReports)
+const _origLoadReports = typeof loadReports === "function" ? loadReports : null;
+async function loadReports(){
+  const from=document.getElementById("repFrom").value||new Date(Date.now()-30*864e5).toISOString().slice(0,10);
+  const to=document.getElementById("repTo").value||new Date().toISOString().slice(0,10);
+  document.getElementById("repFrom").value=from;
+  document.getElementById("repTo").value=to;
+  const r=await api(`/api/reports/summary?from=${from}&to=${to}`);
+  document.getElementById("repStats").innerHTML=`
+    <div class="card p-5"><p class="text-sm text-slate-500">Sales</p><p class="text-2xl font-bold">${fmt(r.sales_total)}</p><p class="text-xs text-slate-400">${r.sales_count} orders</p></div>
+    <div class="card p-5"><p class="text-sm text-slate-500">Purchases</p><p class="text-2xl font-bold">${fmt(r.purchases_total)}</p><p class="text-xs text-slate-400">${r.purchases_count} POs</p></div>
+    <div class="card p-5"><p class="text-sm text-slate-500">Collections</p><p class="text-2xl font-bold text-emerald-600">${fmt(r.payments_total)}</p></div>`;
+  document.getElementById("topCustomers").innerHTML=(r.top_customers||[]).map((c,i)=>`
+    <div class="flex justify-between py-2 border-b text-sm"><span>${i+1}. ${c.customer_name}</span><span class="font-semibold">${fmt(c.total)} (${c.orders} orders)</span></div>`).join("")||"<p class='text-slate-400'>No data</p>";
+  try{
+    const p=await api(`/api/reports/profit?from=${from}&to=${to}`);
+    const el=document.getElementById("profitStats");
+    if(el) el.innerHTML=`
+      <div class="card p-3"><p class="text-xs text-slate-500">Revenue</p><p class="font-bold">${fmt(p.revenue)}</p></div>
+      <div class="card p-3"><p class="text-xs text-slate-500">COGS</p><p class="font-bold">${fmt(p.cogs)}</p></div>
+      <div class="card p-3"><p class="text-xs text-slate-500">Gross Profit</p><p class="font-bold text-emerald-600">${fmt(p.gross_profit)}</p></div>
+      <div class="card p-3"><p class="text-xs text-slate-500">Net Profit</p><p class="font-bold ${p.net_profit>=0?"text-emerald-600":"text-red-600"}">${fmt(p.net_profit)}</p></div>`;
+    const pi=document.getElementById("profitItems");
+    if(pi) pi.innerHTML=(p.items||[]).slice(0,10).map(i=>`<div class="flex justify-between border-b py-1"><span>${i.product_name} × ${i.qty}</span><span>Rev ${fmt(i.revenue)} | Profit ${fmt((i.revenue||0)-(i.cogs||0))}</span></div>`).join("")||"";
+  }catch(e){}
+}
+
+// PDF + WhatsApp
+let lastInvoice=null;
+async function viewInvoice(id){
+  try{
+    const s=await api("/api/sales/"+id);
+    lastInvoice=s;
+    const settings=await api("/api/settings");
+    document.getElementById("invoiceContent").innerHTML=`
+      <div class="text-center mb-6">
+        <h2 class="text-xl font-bold">${settings.company_name||"DistroFlow Traders"}</h2>
+        <p class="text-sm text-slate-500">${settings.address||""}</p>
+        <p class="text-sm text-slate-500">${settings.phone||""} ${settings.email||""}</p>
+      </div>
+      <div class="flex justify-between mb-6 text-sm">
+        <div><p class="font-semibold">Bill To:</p><p>${s.customer_name}</p><p class="text-slate-500">${s.type}</p></div>
+        <div class="text-right"><p><strong>Invoice:</strong> ${s.order_no}</p><p><strong>Date:</strong> ${s.order_date}</p>
+          <p><strong>Status:</strong> ${s.payment_status}</p></div>
+      </div>
+      <table class="w-full text-sm mb-6">
+        <thead><tr class="border-b-2"><th class="py-2 text-left">Item</th><th class="py-2 text-right">Qty</th><th class="py-2 text-right">Price</th><th class="py-2 text-right">Total</th></tr></thead>
+        <tbody>${(s.items||[]).map(i=>`<tr class="borderborder-b"><td class="py-2">${i.product_name}</td><td class="py-2 text-right">${i.quantity}</td><td class="py-2 text-right">${Number(i.unit_price).toLocaleString()}</td><td class="py-2 text-right">${Number(i.total).toLocaleString()}</td></tr>`).join("")}</tbody>
+      </table>
+      <div class="text-sm space-y-1 max-w-xs ml-auto">
+        <div class="flex justify-between"><span>Subtotal</span><span>Rs ${Number(s.subtotal).toLocaleString()}</span></div>
+        <div class="flex justify-between"><span>Tax (${s.tax_rate}%)</span><span>Rs ${Number(s.tax_amount).toLocaleString()}</span></div>
+        <div class="flex justify-between"><span>Discount</span><span>Rs ${Number(s.discount).toLocaleString()}</span></div>
+        <div class="flex justify-between font-bold text-base border-t pt-2"><span>Total</span><span>Rs ${Number(s.amount).toLocaleString()}</span></div>
+        <div class="flex justify-between"><span>Paid</span><span>Rs ${Number(s.paid).toLocaleString()}</span></div>
+        <div class="flex justify-between"><span>Balance</span><span>Rs ${Number(s.amount-s.paid).toLocaleString()}</span></div>
+      </div>
+      <p class="text-center text-xs text-slate-400 mt-8">Thank you for your business!</p>`;
+    document.getElementById("invoiceModal").classList.remove("hidden");
+    document.getElementById("invoiceModal").classList.add("flex");
+  }catch(e){toast(e.message,"error")}
+}
+function downloadInvoicePDF(){
+  if(!lastInvoice){toast("Open invoice first","error");return;}
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const s=lastInvoice;
+    doc.setFontSize(16); doc.text("INVOICE "+s.order_no, 20, 20);
+    doc.setFontSize(11);
+    doc.text("Customer: "+s.customer_name, 20, 35);
+    doc.text("Date: "+s.order_date, 20, 42);
+    doc.text("Total: Rs "+Number(s.amount).toLocaleString(), 20, 49);
+    doc.text("Paid: Rs "+Number(s.paid||0).toLocaleString(), 20, 56);
+    doc.text("Status: "+(s.payment_status||""), 20, 63);
+    let y=75;
+    (s.items||[]).forEach(i=>{
+      doc.text(`${i.product_name} x${i.quantity} = Rs ${Number(i.total).toLocaleString()}`, 20, y);
+      y+=7;
+    });
+    doc.save(s.order_no+".pdf");
+    toast("PDF downloaded");
+  }catch(e){toast("PDF error: "+e.message,"error")}
+}
+function shareWhatsApp(){
+  if(!lastInvoice){toast("Open invoice first","error");return;}
+  const s=lastInvoice;
+  const text=encodeURIComponent(`Invoice ${s.order_no}\nCustomer: ${s.customer_name}\nAmount: Rs ${Number(s.amount).toLocaleString()}\nDate: ${s.order_date}\nPayment: ${s.payment_status||""}`);
+  window.open("https://wa.me/?text="+text, "_blank");
 }
 
 checkAuth();
