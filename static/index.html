@@ -117,6 +117,11 @@ body{font-family:Inter,system-ui,sans-serif}
       <a href="#" onclick="showPage('expenses');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="expenses"><i data-lucide="receipt" class="h-5 w-5"></i> Expenses</a>
       <a href="#" onclick="showPage('warehouses');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="warehouses"><i data-lucide="building" class="h-5 w-5"></i> Warehouses</a>
 
+      
+      <a href="#" onclick="showPage('deliveries');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="deliveries"><i data-lucide="map-pin" class="h-5 w-5"></i> Deliveries</a>
+      <a href="#" onclick="showPage('transfers');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="transfers"><i data-lucide="arrow-left-right" class="h-5 w-5"></i> Stock Transfer</a>
+      <a href="#" onclick="showPage('branches');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="branches"><i data-lucide="git-branch" class="h-5 w-5"></i> Branches</a>
+
       <a href="#" onclick="showPage('users');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="users" id="navUsers"><i data-lucide="shield" class="h-5 w-5"></i> Users</a>
       <a href="#" onclick="showPage('settings');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="settings"><i data-lucide="settings" class="h-5 w-5"></i> Settings</a>
     </nav>
@@ -331,6 +336,37 @@ body{font-family:Inter,system-ui,sans-serif}
         </div>
       </div>
 
+      
+      <!-- DELIVERIES -->
+      <div id="page-deliveries" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Deliveries</h1>
+          <button onclick="openDeliveryModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ Assign Delivery</button>
+        </div>
+        <div class="card overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="bg-slate-50 text-left text-slate-500 border-b"><th class="px-4 py-3">Order</th><th class="px-4 py-3">Customer</th><th class="px-4 py-3">Driver</th><th class="px-4 py-3">Vehicle</th><th class="px-4 py-3">Date</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Action</th></tr></thead>
+          <tbody id="deliveriesBody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- TRANSFERS -->
+      <div id="page-transfers" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Stock Transfer</h1>
+          <button onclick="openTransferModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ Transfer Stock</button>
+        </div>
+        <div class="card overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="bg-slate-50 text-left text-slate-500 border-b"><th class="px-4 py-3">Transfer No</th><th class="px-4 py-3">Product</th><th class="px-4 py-3">Qty</th><th class="px-4 py-3">From WH</th><th class="px-4 py-3">To WH</th><th class="px-4 py-3">Date</th></tr></thead>
+          <tbody id="transfersBody"></tbody>
+        </table></div></div>
+      </div>
+
+      <!-- BRANCHES -->
+      <div id="page-branches" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Branches</h1>
+          <button onclick="openBranchModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ Add Branch</button>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" id="branchesGrid"></div>
+      </div>
+
       <!-- USERS -->
       <div id="page-users" class="page space-y-4">
         <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">User Management</h1>
@@ -516,7 +552,7 @@ function showPage(name){
   const link=document.querySelector(`[data-page="${name}"]`);
   if(link) link.classList.add("active");
   document.getElementById("sidebar").classList.add("-translate-x-full");
-  const titles={dashboard:"Dashboard",pos:"New Sale (POS)",sales:"Sales Orders",products:"Products",inventory:"Inventory",customers:"Customers",payments:"Payments",purchases:"Purchases",suppliers:"Suppliers",reports:"Reports",returns:"Returns",quotations:"Quotations",expenses:"Expenses",warehouses:"Warehouses",users:"Users",settings:"Settings"};
+  const titles={dashboard:"Dashboard",pos:"New Sale (POS)",sales:"Sales Orders",products:"Products",inventory:"Inventory",customers:"Customers",payments:"Payments",purchases:"Purchases",suppliers:"Suppliers",reports:"Reports",returns:"Returns",quotations:"Quotations",expenses:"Expenses",warehouses:"Warehouses",deliveries:"Deliveries",transfers:"Stock Transfer",branches:"Branches",users:"Users",settings:"Settings"};
   document.getElementById("pageTitle").textContent = titles[name]||name;
   if(name==="dashboard") loadDashboard();
   if(name==="pos") loadPOS();
@@ -532,6 +568,9 @@ function showPage(name){
   if(name==="quotations") loadQuotations();
   if(name==="expenses") loadExpenses();
   if(name==="warehouses") loadWarehouses();
+  if(name==="deliveries") loadDeliveries();
+  if(name==="transfers") loadTransfers();
+  if(name==="branches") loadBranches();
   if(name==="users") loadUsers();
   if(name==="settings") loadSettings();
   lucide.createIcons();
@@ -577,8 +616,23 @@ async function loadPOS(){
   productsCache = await api("/api/products");
   customersCache = await api("/api/customers");
   document.getElementById("posCustomer").innerHTML = customersCache.map(c=>`<option value="${c.id}" data-name="${c.name}">${c.name} (${c.type})</option>`).join("");
+  const ps=document.getElementById("posSearch");
+  ps.onkeydown=posBarcodeHandler;
   filterPosProducts();
   renderCart();
+}
+function posBarcodeHandler(e){
+  if(e.key!=="Enter") return;
+  const q=(document.getElementById("posSearch").value||"").trim().toLowerCase();
+  if(!q) return;
+  const p=productsCache.find(x=>(x.barcode&&x.barcode.toLowerCase()===q)||x.sku.toLowerCase()===q);
+  if(p){
+    addToCart({id:p.id,name:p.name,sku:p.sku,wholesale:p.wholesale,retail:p.retail,stock:p.stock});
+    document.getElementById("posSearch").value="";
+    filterPosProducts();
+    toast(p.name+" added");
+    e.preventDefault();
+  }
 }
 function filterPosProducts(){
   const q=(document.getElementById("posSearch").value||"").toLowerCase();
@@ -878,15 +932,27 @@ async function loadPurchases(){
 }
 async function openPurchaseModal(){
   suppliersCache=await api("/api/suppliers");
+  productsCache=await api("/api/products");
   openModal("New Purchase Order",`
     <div class="space-y-3">
       <div><label class="text-sm font-medium">Supplier</label><select id="f_sup" class="w-full rounded-lg border px-3 py-2 text-sm">${suppliersCache.map(s=>`<option value="${s.name}">${s.name}</option>`).join("")}</select></div>
-      <div><label class="text-sm font-medium">Amount *</label><input id="f_pamt2" type="number" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      <div><label class="text-sm font-medium">Product</label><select id="f_pprod" class="w-full rounded-lg border px-3 py-2 text-sm">${productsCache.map(p=>`<option value="${p.id}" data-name="${p.name}" data-cost="${p.cost}">${p.name}</option>`).join("")}</select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">Qty</label><input id="f_pqty" type="number" value="1" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+        <div><label class="text-sm font-medium">Unit Cost</label><input id="f_pcost" type="number" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      </div>
       <div><label class="text-sm font-medium">Status</label><select id="f_pstatus" class="w-full rounded-lg border px-3 py-2 text-sm"><option>Pending</option><option>Received</option></select></div>
+      <p class="text-xs text-slate-500">Received status will add stock automatically</p>
     </div>`, async()=>{
-    const amount=Number(document.getElementById("f_pamt2").value);
-    if(!amount){toast("Enter amount","error");return;}
-    await api("/api/purchases",{method:"POST",body:{supplier_name:document.getElementById("f_sup").value, amount, status:document.getElementById("f_pstatus").value}});
+    const psel=document.getElementById("f_pprod");
+    const qty=Number(document.getElementById("f_pqty").value)||1;
+    let cost=Number(document.getElementById("f_pcost").value);
+    if(!cost) cost=Number(psel.options[psel.selectedIndex].dataset.cost)||0;
+    await api("/api/purchases",{method:"POST",body:{
+      supplier_name:document.getElementById("f_sup").value,
+      status:document.getElementById("f_pstatus").value,
+      items:[{product_id:Number(psel.value), product_name:psel.options[psel.selectedIndex].dataset.name, quantity:qty, unit_cost:cost}]
+    }});
     toast("PO created"); closeModal(); loadPurchases();
   });
 }
@@ -1283,6 +1349,122 @@ function shareWhatsApp(){
   const s=lastInvoice;
   const text=encodeURIComponent(`Invoice ${s.order_no}\nCustomer: ${s.customer_name}\nAmount: Rs ${Number(s.amount).toLocaleString()}\nDate: ${s.order_date}\nPayment: ${s.payment_status||""}`);
   window.open("https://wa.me/?text="+text, "_blank");
+}
+
+
+// DELIVERIES
+async function loadDeliveries(){
+  const list=await api("/api/deliveries");
+  document.getElementById("deliveriesBody").innerHTML=list.map(d=>`<tr class="border-b border-slate-50">
+    <td class="px-4 py-3 font-medium text-primary-600">${d.order_no||"-"}</td>
+    <td class="px-4 py-3">${d.customer_name||"-"}</td>
+    <td class="px-4 py-3">${d.driver_name||"-"}</td>
+    <td class="px-4 py-3">${d.vehicle||"-"}</td>
+    <td class="px-4 py-3">${d.delivery_date||"-"}</td>
+    <td class="px-4 py-3">${badge(d.status)}</td>
+    <td class="px-4 py-3">${d.status!=="Delivered"?`<button onclick="markDelivered(${d.id})" class="text-xs text-primary-600">Mark Delivered</button>`:""}</td>
+  </tr>`).join("")||"<tr><td colspan='7' class='px-4 py-8 text-center text-slate-400'>No deliveries</td></tr>";
+}
+async function openDeliveryModal(){
+  const sales=await api("/api/sales");
+  openModal("Assign Delivery",`
+    <div class="space-y-3">
+      <div><label class="text-sm font-medium">Sale Order</label>
+        <select id="f_dsale" class="w-full rounded-lg border px-3 py-2 text-sm">${sales.slice(0,30).map(s=>`<option value="${s.id}" data-no="${s.order_no}" data-cust="${s.customer_name}">${s.order_no} - ${s.customer_name}</option>`).join("")}</select></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">Driver Name</label><input id="f_ddriver" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+        <div><label class="text-sm font-medium">Vehicle</label><input id="f_dveh" class="w-full rounded-lg border px-3 py-2 text-sm" placeholder="ABC-123"/></div>
+      </div>
+      <div><label class="text-sm font-medium">Status</label>
+        <select id="f_dstatus" class="w-full rounded-lg border px-3 py-2 text-sm"><option>Pending</option><option>Out for Delivery</option><option>Delivered</option></select></div>
+      <div><label class="text-sm font-medium">Notes</label><input id="f_dnotes" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+    </div>`, async()=>{
+    const sel=document.getElementById("f_dsale");
+    await api("/api/deliveries",{method:"POST",body:{
+      sale_id:Number(sel.value), order_no:sel.options[sel.selectedIndex].dataset.no,
+      customer_name:sel.options[sel.selectedIndex].dataset.cust,
+      driver_name:document.getElementById("f_ddriver").value,
+      vehicle:document.getElementById("f_dveh").value,
+      status:document.getElementById("f_dstatus").value,
+      notes:document.getElementById("f_dnotes").value
+    }});
+    toast("Delivery assigned"); closeModal(); loadDeliveries();
+  });
+}
+async function markDelivered(id){
+  await api("/api/deliveries/"+id,{method:"PUT",body:{status:"Delivered"}});
+  toast("Marked delivered"); loadDeliveries();
+}
+
+// TRANSFERS
+async function loadTransfers(){
+  const list=await api("/api/stock-transfers");
+  const wh=await api("/api/warehouses");
+  const whMap={}; wh.forEach(w=>whMap[w.id]=w.name);
+  document.getElementById("transfersBody").innerHTML=list.map(t=>`<tr class="border-b border-slate-50">
+    <td class="px-4 py-3 font-medium text-primary-600">${t.transfer_no}</td>
+    <td class="px-4 py-3">${t.product_name}</td>
+    <td class="px-4 py-3 font-semibold">${t.quantity}</td>
+    <td class="px-4 py-3">${whMap[t.from_warehouse_id]||t.from_warehouse_id}</td>
+    <td class="px-4 py-3">${whMap[t.to_warehouse_id]||t.to_warehouse_id}</td>
+    <td class="px-4 py-3">${t.transfer_date||""}</td>
+  </tr>`).join("")||"<tr><td colspan='6' class='px-4 py-8 text-center text-slate-400'>No transfers</td></tr>";
+}
+async function openTransferModal(){
+  const wh=await api("/api/warehouses");
+  productsCache=await api("/api/products");
+  openModal("Transfer Stock",`
+    <div class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">From Warehouse</label>
+          <select id="f_tfrom" class="w-full rounded-lg border px-3 py-2 text-sm">${wh.map(w=>`<option value="${w.id}">${w.name}</option>`).join("")}</select></div>
+        <div><label class="text-sm font-medium">To Warehouse</label>
+          <select id="f_tto" class="w-full rounded-lg border px-3 py-2 text-sm">${wh.map(w=>`<option value="${w.id}">${w.name}</option>`).join("")}</select></div>
+      </div>
+      <div><label class="text-sm font-medium">Product</label>
+        <select id="f_tprod" class="w-full rounded-lg border px-3 py-2 text-sm">${productsCache.map(p=>`<option value="${p.id}" data-name="${p.name}">${p.name} (Stock ${p.stock})</option>`).join("")}</select></div>
+      <div><label class="text-sm font-medium">Quantity</label><input id="f_tqty" type="number" value="1" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      <div><label class="text-sm font-medium">Notes</label><input id="f_tnotes" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+    </div>`, async()=>{
+    const psel=document.getElementById("f_tprod");
+    const from=Number(document.getElementById("f_tfrom").value);
+    const to=Number(document.getElementById("f_tto").value);
+    if(from===to){toast("Select different warehouses","error");return;}
+    await api("/api/stock-transfers",{method:"POST",body:{
+      from_warehouse_id:from, to_warehouse_id:to,
+      product_id:Number(psel.value), product_name:psel.options[psel.selectedIndex].dataset.name,
+      quantity:Number(document.getElementById("f_tqty").value)||1,
+      notes:document.getElementById("f_tnotes").value
+    }});
+    toast("Transfer done"); closeModal(); loadTransfers();
+  });
+}
+
+// BRANCHES
+async function loadBranches(){
+  const list=await api("/api/branches");
+  document.getElementById("branchesGrid").innerHTML=list.map(b=>`
+    <div class="card p-5">
+      <h3 class="font-semibold text-lg">${b.name}</h3>
+      <p class="text-sm text-slate-500 mt-1">${b.city||"-"}</p>
+      <p class="text-sm text-slate-500">${b.phone||"-"}</p>
+      <span class="badge badge-success mt-2">${b.status}</span>
+    </div>`).join("")||"<p class='text-slate-400'>No branches</p>";
+}
+function openBranchModal(){
+  openModal("Add Branch",`
+    <div class="space-y-3">
+      <div><label class="text-sm font-medium">Branch Name *</label><input id="f_bname" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">City</label><input id="f_bcity" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+        <div><label class="text-sm font-medium">Phone</label><input id="f_bphone" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      </div>
+    </div>`, async()=>{
+    const name=document.getElementById("f_bname").value.trim();
+    if(!name){toast("Name required","error");return;}
+    await api("/api/branches",{method:"POST",body:{name, city:document.getElementById("f_bcity").value, phone:document.getElementById("f_bphone").value}});
+    toast("Branch added"); closeModal(); loadBranches();
+  });
 }
 
 checkAuth();
