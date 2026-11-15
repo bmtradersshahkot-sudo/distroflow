@@ -24,32 +24,57 @@ body{font-family:Inter,system-ui,sans-serif}
 .toast{animation:slideIn .3s ease}
 @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
 @media print{.no-print{display:none!important}#invoicePrint{display:block!important}}
+    .fade-in{animation:fadeIn .35s ease}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .page.active{animation:fadeIn .3s ease}
+    .card{transition:box-shadow .2s,transform .2s}
+    .card:hover{box-shadow:0 8px 24px rgba(15,23,42,.08)}
+    .btn-press:active{transform:scale(.98)}
+    .sidebar-link{transition:background .15s,color .15s,transform .15s}
+    .stat-card{transition:transform .2s}
+    .stat-card:hover{transform:translateY(-2px)}
+    .pos-product{transition:all .15s}
+    .pos-product:hover{transform:translateY(-2px);border-color:#3b82f6}
+    .spinner{border:2px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;width:20px;height:20px;animation:spin .6s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .login-bg{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%)}
+    .glass{background:rgba(255,255,255,.95);backdrop-filter:blur(12px)}
+    input:focus,select:focus,textarea:focus{outline:none;box-shadow:0 0 0 3px rgba(37,99,235,.2);border-color:#2563eb}
+    .nav-glow.active{box-shadow:inset 3px 0 0 #60a5fa}
 </style>
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
 
 <!-- LOGIN -->
-<div id="loginScreen" class="min-h-screen flex items-center justify-center bg-slate-900 p-4">
-  <div class="w-full max-w-md">
+<div id="loginScreen" class="min-h-screen flex items-center justify-center login-bg p-4">
+  <div class="w-full max-w-md fade-in">
     <div class="text-center mb-8">
-      <div class="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-600 mb-4">
-        <i data-lucide="package" class="h-7 w-7 text-white"></i>
+      <div class="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 mb-4 shadow-lg shadow-primary-600/30">
+        <i data-lucide="package" class="h-8 w-8 text-white"></i>
       </div>
-      <h1 class="text-2xl font-bold text-white">DistroFlow Pro</h1>
-      <p class="text-slate-400 text-sm mt-1">Advanced Distribution Management</p>
+      <h1 class="text-3xl font-bold text-white tracking-tight">DistroFlow Pro</h1>
+      <p class="text-slate-400 text-sm mt-2">Advanced Distribution Management System</p>
     </div>
-    <div class="card p-6">
+    <div class="glass rounded-2xl p-8 shadow-2xl border border-white/20">
+      <h2 class="text-lg font-semibold text-slate-800 mb-6">Sign in to continue</h2>
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium mb-1.5">Username</label>
-          <input id="loginUser" type="text" value="admin" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" placeholder="admin"/>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Username</label>
+          <input id="loginUser" type="text" value="admin" autocomplete="username" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition" placeholder="Enter username"/>
         </div>
         <div>
-          <label class="block text-sm font-medium mb-1.5">Password</label>
-          <input id="loginPass" type="password" value="admin123" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"/>
+          <label class="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+          <input id="loginPass" type="password" value="admin123" autocomplete="current-password" class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm transition" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()"/>
         </div>
-        <button onclick="doLogin()" class="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white hover:bg-primary-700">Sign In</button>
-        <p class="text-xs text-center text-slate-400">Default: admin / admin123</p>
+        <p id="loginError" class="text-sm text-red-600 hidden"></p>
+        <button id="loginBtn" onclick="doLogin()" class="btn-press w-full rounded-xl bg-gradient-to-r from-primary-600 to-primary-700 py-3 text-sm font-semibold text-white shadow-lg shadow-primary-600/25 hover:from-primary-700 hover:to-primary-800 transition flex items-center justify-center gap-2">
+          <span id="loginBtnText">Sign In</span>
+          <span id="loginSpinner" class="spinner hidden"></span>
+        </button>
+        <div class="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs text-slate-500 text-center">
+          Default login: <strong>admin</strong> / <strong>admin123</strong>
+        </div>
+        <button onclick="resetAdmin()" class="w-full text-xs text-slate-400 hover:text-primary-600 transition">Login issue? Reset admin account</button>
       </div>
     </div>
   </div>
@@ -301,15 +326,27 @@ let salesChart = null;
 let editingId = null;
 
 async function api(path, opts={}) {
-  const res = await fetch(API + path, {
-    credentials: "include",
-    headers: {"Content-Type":"application/json", ...(opts.headers||{})},
-    ...opts,
-    body: opts.body ? JSON.stringify(opts.body) : undefined
-  });
+  let res;
+  try {
+    res = await fetch(API + path, {
+      credentials: "include",
+      headers: {"Content-Type":"application/json", ...(opts.headers||{})},
+      ...opts,
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+  } catch(networkErr) {
+    throw new Error("Server not reachable. Wait 30s if site just woke up, then retry.");
+  }
   if (!res.ok) {
-    const err = await res.json().catch(()=>({}));
-    throw new Error(err.error || res.statusText);
+    let msg = res.statusText || "Request failed";
+    try {
+      const err = await res.json();
+      msg = err.error || err.message || msg;
+    } catch(e) {
+      if(res.status === 502 || res.status === 503) msg = "Server starting up... please wait 30 seconds and try again.";
+      else if(res.status === 401) msg = "Invalid username or password";
+    }
+    throw new Error(msg);
   }
   return res.json();
 }
@@ -330,17 +367,44 @@ function badge(s){
 
 // AUTH
 async function doLogin(){
+  const btn=document.getElementById("loginBtn");
+  const btnText=document.getElementById("loginBtnText");
+  const spinner=document.getElementById("loginSpinner");
+  const errEl=document.getElementById("loginError");
+  if(errEl){ errEl.classList.add("hidden"); errEl.textContent=""; }
+  if(btnText) btnText.textContent="Signing in...";
+  if(spinner) spinner.classList.remove("hidden");
+  if(btn) btn.disabled=true;
   try {
-    const r = await api("/api/login",{method:"POST",body:{username:document.getElementById("loginUser").value, password:document.getElementById("loginPass").value}});
+    // Ensure admin exists (helps after free-tier DB reset)
+    try { await api("/api/setup",{method:"POST",body:{}}); } catch(e){}
+    const r = await api("/api/login",{method:"POST",body:{username:document.getElementById("loginUser").value.trim(), password:document.getElementById("loginPass").value}});
     currentUser = r.user;
+    localStorage.setItem("df_user", JSON.stringify(r.user));
     document.getElementById("loginScreen").classList.add("hidden");
     document.getElementById("appScreen").classList.remove("hidden");
     document.getElementById("userName").textContent = r.user.full_name || r.user.username;
     document.getElementById("userRole").textContent = r.user.role;
-    document.getElementById("userAvatar").textContent = (r.user.full_name||"A")[0].toUpperCase();
+    document.getElementById("userAvatar").textContent = (r.user.full_name||r.user.username||"A")[0].toUpperCase();
     lucide.createIcons();
+    toast("Welcome, "+(r.user.full_name||r.user.username));
     showPage("dashboard");
-  } catch(e){ toast(e.message,"error"); }
+  } catch(e){
+    if(errEl){ errEl.textContent = e.message || "Login failed"; errEl.classList.remove("hidden"); }
+    toast(e.message||"Login failed","error");
+  } finally {
+    if(btnText) btnText.textContent="Sign In";
+    if(spinner) spinner.classList.add("hidden");
+    if(btn) btn.disabled=false;
+  }
+}
+async function resetAdmin(){
+  try{
+    const r=await api("/api/setup",{method:"POST",body:{reset:true}});
+    toast(r.message||"Admin reset: admin / admin123");
+    document.getElementById("loginUser").value="admin";
+    document.getElementById("loginPass").value="admin123";
+  }catch(e){ toast(e.message,"error"); }
 }
 async function doLogout(){
   await api("/api/logout",{method:"POST"});
@@ -349,18 +413,24 @@ async function doLogout(){
   document.getElementById("loginScreen").classList.remove("hidden");
 }
 async function checkAuth(){
+  lucide.createIcons();
   try {
+    // Wake DB / ensure admin on free hosting cold start
+    try { await api("/api/setup",{method:"POST",body:{}}); } catch(e){}
     const r = await api("/api/me");
     if(r.user){
       currentUser=r.user;
+      localStorage.setItem("df_user", JSON.stringify(r.user));
       document.getElementById("loginScreen").classList.add("hidden");
       document.getElementById("appScreen").classList.remove("hidden");
       document.getElementById("userName").textContent = r.user.full_name||r.user.username;
       document.getElementById("userRole").textContent = r.user.role;
-      document.getElementById("userAvatar").textContent = (r.user.full_name||"A")[0].toUpperCase();
+      document.getElementById("userAvatar").textContent = (r.user.full_name||r.user.username||"A")[0].toUpperCase();
       showPage("dashboard");
     }
-  } catch(e){}
+  } catch(e){
+    console.log("Auth check:", e.message);
+  }
   lucide.createIcons();
 }
 
