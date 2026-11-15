@@ -559,21 +559,16 @@ async function submitSale(){
   const sel=document.getElementById("posCustomer");
   const customer_id=Number(sel.value)||null;
   const customer_name=sel.options[sel.selectedIndex]?.dataset?.name || sel.options[sel.selectedIndex]?.text || "Walk-in";
-  // Credit limit check
-  const cust=customersCache.find(c=>c.id===customer_id);
-  const sub=cart.reduce((a,c)=>a+c.quantity*c.unit_price,0);
-  const taxPct=Number(document.getElementById("cartTax").value)||0;
-  const disc=Number(document.getElementById("cartDiscount").value)||0;
-  const total=sub+Math.round(sub*taxPct/100)-disc;
-  const paid=Number(document.getElementById("cartPaid").value)||0;
-  const creditNeeded=total-paid;
-  if(cust && cust.credit_limit>0 && (cust.outstanding+creditNeeded)>cust.credit_limit){
-    if(!confirm("WARNING: This sale exceeds customer credit limit!\nLimit: Rs "+cust.credit_limit.toLocaleString()+"\nOutstanding: Rs "+Number(cust.outstanding).toLocaleString()+"\nThis bill credit: Rs "+creditNeeded.toLocaleString()+"\n\nContinue anyway?")) return;
-  }
-  const sub=cart.reduce((a,c)=>a+c.quantity*c.unit_price,0);
+  const subtotal=cart.reduce((a,c)=>a+c.quantity*c.unit_price,0);
   const tax_rate=Number(document.getElementById("cartTax").value)||0;
   const discount=Number(document.getElementById("cartDiscount").value)||0;
+  const total=subtotal+Math.round(subtotal*tax_rate/100)-discount;
   const paid=Number(document.getElementById("cartPaid").value)||0;
+  const creditNeeded=total-paid;
+  const cust=customersCache.find(c=>c.id===customer_id);
+  if(cust && cust.credit_limit>0 && (Number(cust.outstanding)+creditNeeded)>cust.credit_limit){
+    if(!confirm("WARNING: Credit limit exceeded! Continue anyway?")) return;
+  }
   try{
     const sale=await api("/api/sales",{method:"POST",body:{
       customer_id, customer_name, type:document.getElementById("posType").value,
