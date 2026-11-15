@@ -73,6 +73,7 @@ body{font-family:Inter,system-ui,sans-serif}
       <a href="#" onclick="showPage('purchases');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="purchases"><i data-lucide="truck" class="h-5 w-5"></i> Purchases</a>
       <a href="#" onclick="showPage('suppliers');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="suppliers"><i data-lucide="building-2" class="h-5 w-5"></i> Suppliers</a>
       <a href="#" onclick="showPage('reports');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="reports"><i data-lucide="bar-chart-3" class="h-5 w-5"></i> Reports</a>
+      <a href="#" onclick="showPage('users');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="users" id="navUsers"><i data-lucide="shield" class="h-5 w-5"></i> Users</a>
       <a href="#" onclick="showPage('settings');return false" class="sidebar-link flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium" data-page="settings"><i data-lucide="settings" class="h-5 w-5"></i> Settings</a>
     </nav>
     <div class="absolute bottom-0 left-0 right-0 border-t border-slate-700/50 p-4 bg-slate-900">
@@ -144,7 +145,7 @@ body{font-family:Inter,system-ui,sans-serif}
       <!-- SALES -->
       <div id="page-sales" class="page space-y-4">
         <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">Sales Orders</h1>
-          <button onclick="showPage('pos')" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ New Sale</button>
+          <div class="flex gap-2"><button onclick="exportSalesCSV()" class="rounded-lg border px-4 py-2 text-sm">Export CSV</button><button onclick="showPage('pos')" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ New Sale</button></div>
         </div>
         <div class="card p-4"><input id="saleSearch" type="search" placeholder="Search..." class="w-full max-w-md rounded-lg border px-3 py-2 text-sm" oninput="loadSales()"/></div>
         <div class="card overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
@@ -230,6 +231,18 @@ body{font-family:Inter,system-ui,sans-serif}
         </div>
         <div class="grid gap-4 sm:grid-cols-3" id="repStats"></div>
         <div class="card p-5"><h3 class="font-semibold mb-3">Top Customers</h3><div id="topCustomers"></div></div>
+      </div>
+
+      
+      <!-- USERS -->
+      <div id="page-users" class="page space-y-4">
+        <div class="flex justify-between items-center"><h1 class="text-2xl font-bold">User Management</h1>
+          <button onclick="openUserModal()" class="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white">+ Add User</button>
+        </div>
+        <div class="card overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="bg-slate-50 text-left text-slate-500 border-b"><th class="px-4 py-3">Username</th><th class="px-4 py-3">Full Name</th><th class="px-4 py-3">Role</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Actions</th></tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table></div></div>
       </div>
 
       <!-- SETTINGS -->
@@ -359,7 +372,7 @@ function showPage(name){
   const link=document.querySelector(`[data-page="${name}"]`);
   if(link) link.classList.add("active");
   document.getElementById("sidebar").classList.add("-translate-x-full");
-  const titles={dashboard:"Dashboard",pos:"New Sale (POS)",sales:"Sales Orders",products:"Products",inventory:"Inventory",customers:"Customers",payments:"Payments",purchases:"Purchases",suppliers:"Suppliers",reports:"Reports",settings:"Settings"};
+  const titles={dashboard:"Dashboard",pos:"New Sale (POS)",sales:"Sales Orders",products:"Products",inventory:"Inventory",customers:"Customers",payments:"Payments",purchases:"Purchases",suppliers:"Suppliers",reports:"Reports",users:"Users",settings:"Settings"};
   document.getElementById("pageTitle").textContent = titles[name]||name;
   if(name==="dashboard") loadDashboard();
   if(name==="pos") loadPOS();
@@ -371,6 +384,7 @@ function showPage(name){
   if(name==="purchases") loadPurchases();
   if(name==="suppliers") loadSuppliers();
   if(name==="reports") loadReports();
+  if(name==="users") loadUsers();
   if(name==="settings") loadSettings();
   lucide.createIcons();
 }
@@ -475,6 +489,17 @@ async function submitSale(){
   const sel=document.getElementById("posCustomer");
   const customer_id=Number(sel.value)||null;
   const customer_name=sel.options[sel.selectedIndex]?.dataset?.name || sel.options[sel.selectedIndex]?.text || "Walk-in";
+  // Credit limit check
+  const cust=customersCache.find(c=>c.id===customer_id);
+  const sub=cart.reduce((a,c)=>a+c.quantity*c.unit_price,0);
+  const taxPct=Number(document.getElementById("cartTax").value)||0;
+  const disc=Number(document.getElementById("cartDiscount").value)||0;
+  const total=sub+Math.round(sub*taxPct/100)-disc;
+  const paid=Number(document.getElementById("cartPaid").value)||0;
+  const creditNeeded=total-paid;
+  if(cust && cust.credit_limit>0 && (cust.outstanding+creditNeeded)>cust.credit_limit){
+    if(!confirm("WARNING: This sale exceeds customer credit limit!\nLimit: Rs "+cust.credit_limit.toLocaleString()+"\nOutstanding: Rs "+Number(cust.outstanding).toLocaleString()+"\nThis bill credit: Rs "+creditNeeded.toLocaleString()+"\n\nContinue anyway?")) return;
+  }
   const sub=cart.reduce((a,c)=>a+c.quantity*c.unit_price,0);
   const tax_rate=Number(document.getElementById("cartTax").value)||0;
   const discount=Number(document.getElementById("cartDiscount").value)||0;
@@ -637,7 +662,8 @@ async function loadCustomers(){
         <div><p class="text-xs text-slate-400">Outstanding</p><p class="font-semibold ${c.outstanding>0?"text-red-600":"text-emerald-600"}">Rs ${Number(c.outstanding||0).toLocaleString()}</p></div>
         <div><p class="text-xs text-slate-400">Credit Limit</p><p class="font-semibold">Rs ${Number(c.credit_limit||0).toLocaleString()}</p></div>
       </div>
-      <div class="mt-3 flex gap-2"><button onclick="openCustomerModal(${c.id})" class="text-xs text-primary-600">Edit</button>
+      <div class="mt-3 flex gap-2"><button onclick="viewLedger(${c.id})" class="text-xs text-primary-600">Ledger</button>
+        <button onclick="openCustomerModal(${c.id})" class="text-xs text-primary-600">Edit</button>
         <button onclick="deleteCustomer(${c.id})" class="text-xs text-red-600">Delete</button></div>
     </div>`).join("");
 }
@@ -783,6 +809,83 @@ async function saveSettings(){
     tax_rate:document.getElementById("setTax").value
   }});
   toast("Settings saved");
+}
+
+
+// USERS
+async function loadUsers(){
+  const list=await api("/api/users");
+  document.getElementById("usersBody").innerHTML=list.map(u=>`<tr class="border-b border-slate-50">
+    <td class="px-4 py-3 font-medium">${u.username}</td>
+    <td class="px-4 py-3">${u.full_name||"-"}</td>
+    <td class="px-4 py-3"><span class="badge ${u.role==="admin"?"badge-info":"badge-success"}">${u.role}</span></td>
+    <td class="px-4 py-3">${badge(u.status)}</td>
+    <td class="px-4 py-3"><button onclick='openUserModal(${JSON.stringify({id:u.id,username:u.username,full_name:u.full_name||"",role:u.role,status:u.status})})' class="text-xs text-primary-600 mr-2">Edit</button>
+      ${u.username!=="admin"?`<button onclick="deleteUser(${u.id})" class="text-xs text-red-600">Del</button>`:""}</td>
+  </tr>`).join("");
+}
+function openUserModal(u=null){
+  const isEdit=u&&u.id;
+  openModal(isEdit?"Edit User":"Add User",`
+    <div class="space-y-3">
+      <div><label class="text-sm font-medium">Username ${isEdit?"(locked)":"*"}</label>
+        <input id="f_uname" class="w-full rounded-lg border px-3 py-2 text-sm" value="${isEdit?u.username:""}" ${isEdit?"disabled":""}/></div>
+      <div><label class="text-sm font-medium">Full Name</label><input id="f_ufull" class="w-full rounded-lg border px-3 py-2 text-sm" value="${isEdit?u.full_name:""}"/></div>
+      <div><label class="text-sm font-medium">Password ${isEdit?"(leave blank to keep)":"*"}</label><input id="f_upass" type="password" class="w-full rounded-lg border px-3 py-2 text-sm"/></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm font-medium">Role</label>
+          <select id="f_urole" class="w-full rounded-lg border px-3 py-2 text-sm"><option value="admin" ${isEdit&&u.role==="admin"?"selected":""}>Admin</option><option value="sales" ${!isEdit||u.role==="sales"?"selected":""}>Sales</option></select></div>
+        <div><label class="text-sm font-medium">Status</label>
+          <select id="f_ustatus" class="w-full rounded-lg border px-3 py-2 text-sm"><option ${!isEdit||u.status==="Active"?"selected":""}>Active</option><option ${isEdit&&u.status==="Inactive"?"selected":""}>Inactive</option></select></div>
+      </div>
+    </div>`, async()=>{
+    const body={full_name:document.getElementById("f_ufull").value, role:document.getElementById("f_urole").value, status:document.getElementById("f_ustatus").value};
+    const pass=document.getElementById("f_upass").value;
+    if(pass) body.password=pass;
+    try{
+      if(isEdit){ await api("/api/users/"+u.id,{method:"PUT",body}); }
+      else {
+        body.username=document.getElementById("f_uname").value;
+        body.password=pass;
+        if(!body.username||!pass){toast("Username & password required","error");return;}
+        await api("/api/users",{method:"POST",body});
+      }
+      toast("Saved"); closeModal(); loadUsers();
+    }catch(e){toast(e.message,"error")}
+  });
+}
+async function deleteUser(id){ if(!confirm("Delete user?"))return; try{ await api("/api/users/"+id,{method:"DELETE"}); toast("Deleted"); loadUsers(); }catch(e){toast(e.message,"error")} }
+
+// CSV EXPORT
+async function exportSalesCSV(){
+  const sales=await api("/api/sales");
+  let csv="Order No,Date,Customer,Type,Amount,Paid,Payment Status,Status\\n";
+  sales.forEach(s=>{ csv+=`"${s.order_no}","${s.order_date}","${s.customer_name}","${s.type}",${s.amount},${s.paid||0},"${s.payment_status||""}","${s.status}"\\n`; });
+  const blob=new Blob([csv],{type:"text/csv"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="sales_export.csv"; a.click();
+  toast("CSV downloaded");
+}
+
+// CREDIT LIMIT CHECK on submitSale - patch existing
+
+
+async function viewLedger(id){
+  const d=await api("/api/customers/"+id+"/ledger");
+  const c=d.customer;
+  openModal("Ledger - "+c.name, `
+    <div class="space-y-4 text-sm">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="card p-3"><p class="text-xs text-slate-500">Outstanding</p><p class="text-lg font-bold text-red-600">Rs ${Number(c.outstanding||0).toLocaleString()}</p></div>
+        <div class="card p-3"><p class="text-xs text-slate-500">Credit Limit</p><p class="text-lg font-bold">Rs ${Number(c.credit_limit||0).toLocaleString()}</p></div>
+      </div>
+      <div><p class="font-semibold mb-2">Sales</p>
+        ${(d.sales||[]).slice(0,10).map(s=>`<div class="flex justify-between border-b py-1"><span>${s.order_no} (${s.order_date})</span><span>Rs ${Number(s.amount).toLocaleString()} <span class="text-xs">${s.payment_status||""}</span></span></div>`).join("")||"<p class='text-slate-400'>No sales</p>"}
+      </div>
+      <div><p class="font-semibold mb-2">Payments</p>
+        ${(d.payments||[]).slice(0,10).map(p=>`<div class="flex justify-between border-b py-1"><span>${p.payment_date} - ${p.method}</span><span class="text-emerald-600">Rs ${Number(p.amount).toLocaleString()}</span></div>`).join("")||"<p class='text-slate-400'>No payments</p>"}
+      </div>
+    </div>`, ()=>closeModal());
+  document.getElementById("modalSaveBtn").textContent="Close";
 }
 
 checkAuth();
