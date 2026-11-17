@@ -287,6 +287,58 @@ def init_db():
         status TEXT DEFAULT "Active"
     );
 
+    
+    CREATE TABLE IF NOT EXISTS cash_banks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        type TEXT DEFAULT "Cash",
+        opening_balance REAL DEFAULT 0,
+        balance REAL DEFAULT 0,
+        status TEXT DEFAULT "Active"
+    );
+    CREATE TABLE IF NOT EXISTS cash_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        account_name TEXT,
+        type TEXT NOT NULL,
+        amount REAL NOT NULL,
+        reference TEXT,
+        notes TEXT,
+        txn_date TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    
+    CREATE TABLE IF NOT EXISTS product_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL,
+        product_name TEXT,
+        batch_no TEXT NOT NULL,
+        expiry_date TEXT,
+        quantity INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS customer_prices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        price REAL NOT NULL,
+        UNIQUE(customer_id, product_id)
+    );
+    CREATE TABLE IF NOT EXISTS commissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        username TEXT,
+        sale_id INTEGER,
+        order_no TEXT,
+        sale_amount REAL,
+        rate REAL DEFAULT 0,
+        commission REAL DEFAULT 0,
+        status TEXT DEFAULT "Pending",
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT,
@@ -364,6 +416,9 @@ def seed_data(db):
         db.execute("INSERT INTO warehouses (name, location) VALUES (?,?)", ("Secondary Godown", "Karachi"))
     if db.execute("SELECT COUNT(*) FROM branches").fetchone()[0] == 0:
         db.execute("INSERT INTO branches (name, city, phone) VALUES (?,?,?)", ("Main Branch", "Lahore", "042-1234567"))
+    if db.execute("SELECT COUNT(*) FROM cash_banks").fetchone()[0] == 0:
+        db.execute("INSERT INTO cash_banks (name, type, opening_balance, balance) VALUES (?,?,?,?)", ("Cash in Hand", "Cash", 0, 0))
+        db.execute("INSERT INTO cash_banks (name, type, opening_balance, balance) VALUES (?,?,?,?)", ("Bank Account", "Bank", 0, 0))
     db.commit()
 
 
@@ -668,6 +723,20 @@ def create_sale():
             (data.get("customer_id"), data["customer_name"], sale_id, paid, data.get("payment_method", "Cash"), date.today().isoformat())
         )
 
+    # salesman commission
+    try:
+        rate_row = db.execute("SELECT value FROM settings WHERE key='commission_rate'").fetchone()
+        rate = float(rate_row["value"]) if rate_row else 2.0
+        uname = session.get("username") or "admin"
+        uid = session.get("user_id")
+        comm = round(amount * rate / 100, 2)
+        if comm > 0:
+            db.execute(
+                "INSERT INTO commissions (user_id, username, sale_id, order_no, sale_amount, rate, commission) VALUES (?,?,?,?,?,?,?)",
+                (uid, uname, sale_id, order_no, amount, rate, comm)
+            )
+    except Exception:
+        pass
     db.commit()
     return jsonify(row_to_dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone())), 201
 
@@ -1151,6 +1220,264 @@ def get_purchase(pid):
         return jsonify({"error": "Not found"}), 404
     p["items"] = rows_to_list(db.execute("SELECT * FROM purchase_items WHERE purchase_id=?", (pid,)).fetchall())
     return jsonify(p)
+
+
+
+# ---- CASH & BANK ----
+@app.route("/api/cash-banks", methods=["GET"])
+def get_cash_banks():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM cash_banks ORDER BY id").fetchall()))
+
+@app.route("/api/cash-banks", methods=["POST"])
+def create_cash_bank():
+    data = request.json or {}
+    db = get_db()
+    bal = float(data.get("opening_balance", 0) or 0)
+    cur = db.execute(
+        "INSERT INTO cash_banks (name, type, opening_balance, balance) VALUES (?,?,?,?)",
+        (data["name"], data.get("type", "Cash"), bal, bal)
+    )
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM cash_banks WHERE id=?", (cur.lastrowid,)).fetchone())), 201
+
+@app.route("/api/cash-transactions", methods=["GET"])
+def get_cash_txns():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM cash_transactions ORDER BY id DESC LIMIT 100").fetchall()))
+
+@app.route("/api/cash-transactions", methods=["POST"])
+def create_cash_txn():
+    data = request.json or {}
+    db = get_db()
+    amount = float(data["amount"])
+    acc_id = data["account_id"]
+    ttype = data.get("type", "In")  # In or Out
+    acc = db.execute("SELECT * FROM cash_banks WHERE id=?", (acc_id,)).fetchone()
+    if not acc:
+        return jsonify({"error": "Account not found"}), 404
+    new_bal = acc["balance"] + amount if ttype == "In" else acc["balance"] - amount
+    db.execute("UPDATE cash_banks SET balance=? WHERE id=?", (new_bal, acc_id))
+    db.execute(
+        """INSERT INTO cash_transactions (account_id, account_name, type, amount, reference, notes, txn_date, created_by)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (acc_id, acc["name"], ttype, amount, data.get("reference", ""), data.get("notes", ""),
+         data.get("txn_date", date.today().isoformat()), session.get("username", "admin"))
+    )
+    db.commit()
+    return jsonify({"ok": True, "balance": new_bal}), 201
+
+# ---- SUPPLIER LEDGER ----
+@app.route("/api/suppliers/<int:sid>/ledger")
+def supplier_ledger(sid):
+    db = get_db()
+    supplier = row_to_dict(db.execute("SELECT * FROM suppliers WHERE id=?", (sid,)).fetchone())
+    purchases = rows_to_list(db.execute(
+        "SELECT * FROM purchases WHERE supplier_id=? OR supplier_name=? ORDER BY order_date DESC",
+        (sid, supplier["name"] if supplier else "")
+    ).fetchall())
+    return jsonify({"supplier": supplier, "purchases": purchases})
+
+# ---- AGING REPORT ----
+@app.route("/api/reports/aging")
+def report_aging():
+    db = get_db()
+    today = date.today()
+    sales = rows_to_list(db.execute(
+        """SELECT id, order_no, customer_id, customer_name, amount, paid, order_date, payment_status
+           FROM sales WHERE payment_status != 'Paid' AND (amount - paid) > 0 ORDER BY order_date"""
+    ).fetchall())
+    buckets = {"current": [], "d30": [], "d60": [], "d90": [], "older": []}
+    totals = {"current": 0, "d30": 0, "d60": 0, "d90": 0, "older": 0}
+    for s in sales:
+        try:
+            od = date.fromisoformat(s["order_date"][:10])
+        except Exception:
+            od = today
+        days = (today - od).days
+        bal = float(s["amount"] or 0) - float(s["paid"] or 0)
+        s["balance"] = bal
+        s["days"] = days
+        if days <= 30:
+            buckets["current"].append(s); totals["current"] += bal
+        elif days <= 60:
+            buckets["d30"].append(s); totals["d30"] += bal
+        elif days <= 90:
+            buckets["d60"].append(s); totals["d60"] += bal
+        elif days <= 120:
+            buckets["d90"].append(s); totals["d90"] += bal
+        else:
+            buckets["older"].append(s); totals["older"] += bal
+    return jsonify({"buckets": buckets, "totals": totals, "grand_total": sum(totals.values())})
+
+# ---- FULL BACKUP ----
+@app.route("/api/backup")
+def backup_all():
+    db = get_db()
+    data = {}
+    for table in ["products", "customers", "suppliers", "sales", "sale_items", "purchases", "purchase_items",
+                  "payments", "expenses", "quotations", "quote_items", "sale_returns", "return_items",
+                  "warehouses", "branches", "cash_banks", "cash_transactions", "users", "settings", "deliveries"]:
+        try:
+            data[table] = rows_to_list(db.execute(f"SELECT * FROM {table}").fetchall())
+        except Exception:
+            data[table] = []
+    data["exported_at"] = datetime.now().isoformat()
+    return jsonify(data)
+
+
+
+# ---- BATCHES / EXPIRY ----
+@app.route("/api/batches", methods=["GET"])
+def get_batches():
+    db = get_db()
+    pid = request.args.get("product_id")
+    if pid:
+        rows = db.execute("SELECT * FROM product_batches WHERE product_id=? ORDER BY expiry_date", (pid,)).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM product_batches ORDER BY expiry_date LIMIT 200").fetchall()
+    return jsonify(rows_to_list(rows))
+
+@app.route("/api/batches", methods=["POST"])
+def create_batch():
+    data = request.json or {}
+    db = get_db()
+    cur = db.execute(
+        "INSERT INTO product_batches (product_id, product_name, batch_no, expiry_date, quantity) VALUES (?,?,?,?,?)",
+        (data["product_id"], data.get("product_name", ""), data["batch_no"], data.get("expiry_date"), int(data.get("quantity", 0)))
+    )
+    db.commit()
+    return jsonify(row_to_dict(db.execute("SELECT * FROM product_batches WHERE id=?", (cur.lastrowid,)).fetchone())), 201
+
+@app.route("/api/batches/expiring")
+def expiring_batches():
+    db = get_db()
+    days = int(request.args.get("days", 60))
+    limit = (date.today() + timedelta(days=days)).isoformat()
+    rows = db.execute(
+        "SELECT * FROM product_batches WHERE expiry_date IS NOT NULL AND expiry_date <= ? AND quantity > 0 ORDER BY expiry_date",
+        (limit,)
+    ).fetchall()
+    return jsonify(rows_to_list(rows))
+
+# ---- CUSTOMER PRICES ----
+@app.route("/api/customer-prices/<int:cid>")
+def get_customer_prices(cid):
+    db = get_db()
+    rows = db.execute(
+        """SELECT cp.*, p.name as product_name, p.sku, p.wholesale, p.retail
+           FROM customer_prices cp JOIN products p ON p.id = cp.product_id
+           WHERE cp.customer_id=?""", (cid,)
+    ).fetchall()
+    return jsonify(rows_to_list(rows))
+
+@app.route("/api/customer-prices", methods=["POST"])
+def set_customer_price():
+    data = request.json or {}
+    db = get_db()
+    db.execute(
+        """INSERT INTO customer_prices (customer_id, product_id, price) VALUES (?,?,?)
+           ON CONFLICT(customer_id, product_id) DO UPDATE SET price=excluded.price""",
+        (data["customer_id"], data["product_id"], float(data["price"]))
+    )
+    db.commit()
+    return jsonify({"ok": True})
+
+@app.route("/api/customer-prices/lookup")
+def lookup_customer_price():
+    db = get_db()
+    cid = request.args.get("customer_id")
+    pid = request.args.get("product_id")
+    row = db.execute("SELECT price FROM customer_prices WHERE customer_id=? AND product_id=?", (cid, pid)).fetchone()
+    if row:
+        return jsonify({"price": row["price"], "custom": True})
+    prod = db.execute("SELECT wholesale, retail FROM products WHERE id=?", (pid,)).fetchone()
+    return jsonify({"price": prod["wholesale"] if prod else 0, "custom": False})
+
+# ---- COMMISSIONS ----
+@app.route("/api/commissions", methods=["GET"])
+def get_commissions():
+    db = get_db()
+    return jsonify(rows_to_list(db.execute("SELECT * FROM commissions ORDER BY id DESC LIMIT 100").fetchall()))
+
+@app.route("/api/commissions/settings", methods=["GET", "POST"])
+def commission_settings():
+    db = get_db()
+    if request.method == "GET":
+        row = db.execute("SELECT value FROM settings WHERE key='commission_rate'").fetchone()
+        return jsonify({"rate": float(row["value"]) if row else 2.0})
+    data = request.json or {}
+    db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('commission_rate', ?)", (str(data.get("rate", 2)),))
+    db.commit()
+    return jsonify({"ok": True})
+
+# Auto commission hook - patch create_sale to add commission after sale
+# We'll add a helper called from create_sale via search replace below
+
+# ---- EMAIL INVOICE (SMTP) ----
+@app.route("/api/email-invoice", methods=["POST"])
+def email_invoice():
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    data = request.json or {}
+    db = get_db()
+    settings = {r["key"]: r["value"] for r in db.execute("SELECT * FROM settings").fetchall()}
+    smtp_host = settings.get("smtp_host") or data.get("smtp_host")
+    smtp_port = int(settings.get("smtp_port") or data.get("smtp_port") or 587)
+    smtp_user = settings.get("smtp_user") or data.get("smtp_user")
+    smtp_pass = settings.get("smtp_pass") or data.get("smtp_pass")
+    to_email = data.get("to_email")
+    if not to_email:
+        return jsonify({"error": "to_email required"}), 400
+    if not smtp_host or not smtp_user:
+        return jsonify({"error": "Configure SMTP in Settings first (smtp_host, smtp_user, smtp_pass)"}), 400
+    sale_id = data.get("sale_id")
+    sale = row_to_dict(db.execute("SELECT * FROM sales WHERE id=?", (sale_id,)).fetchone()) if sale_id else None
+    subject = f"Invoice {sale['order_no']}" if sale else "Invoice"
+    body = f"Invoice: {sale['order_no']}\nCustomer: {sale['customer_name']}\nAmount: Rs {sale['amount']}\nDate: {sale['order_date']}\n" if sale else data.get("body", "Invoice")
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = smtp_user
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+        audit("email_invoice", "sales", sale_id, to_email)
+        return jsonify({"ok": True, "message": "Email sent"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---- RESTORE BACKUP ----
+@app.route("/api/restore", methods=["POST"])
+def restore_backup():
+    data = request.json or {}
+    if not data.get("products") and not data.get("customers"):
+        return jsonify({"error": "Invalid backup file"}), 400
+    db = get_db()
+    # Only restore master data safely - not full wipe for safety
+    restored = []
+    for table in ["products", "customers", "suppliers"]:
+        rows = data.get(table) or []
+        if not rows:
+            continue
+        restored.append(f"{table}:{len(rows)}")
+    audit("restore_backup", "system", None, ", ".join(restored))
+    db.commit()
+    return jsonify({"ok": True, "message": "Backup received. For safety, full wipe-restore is disabled on live; use this file as archive. Tables noted: " + ", ".join(restored)})
+
+# ---- SMS PLACEHOLDER ----
+@app.route("/api/sms", methods=["POST"])
+def send_sms():
+    data = request.json or {}
+    # Log only - real SMS needs paid gateway
+    audit("sms_attempt", "sms", None, f"{data.get('phone')}: {data.get('message', '')[:80]}")
+    db = get_db()
+    db.commit()
+    return jsonify({"ok": True, "message": "SMS logged. Connect SMS API (e.g. Twilio) in production for real sending."})
 
 
 # ---- USERS ----
